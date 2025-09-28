@@ -1,23 +1,70 @@
 #!/usr/bin/env node
 
 const { Octokit } = require('@octokit/rest');
-const { execSync, spawn } = require('child_process');
+const { execSync, spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 class DevAgent {
   constructor() {
+    // Validate required environment variables
+    this.validateEnvironment();
+
     this.octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
     this.issueNumber = process.env.ISSUE_NUMBER;
-    this.issueTitle = process.env.ISSUE_TITLE;
-    this.issueBody = process.env.ISSUE_BODY;
+    this.issueTitle = this.sanitizeTitle(process.env.ISSUE_TITLE || '');
+    this.issueBody = process.env.ISSUE_BODY || '';
     this.repository = process.env.REPOSITORY;
     this.baseBranch = process.env.BASE_BRANCH || 'main';
-    this.branchName = `ai/issue-${this.issueNumber}`;
+    this.branchName = this.createSafeBranchName(this.issueNumber);
     this.logDir = '/tmp/agent-logs';
 
     // Ensure log directory exists
     fs.mkdirSync(this.logDir, { recursive: true });
+  }
+
+  validateEnvironment() {
+    const required = [
+      'GITHUB_TOKEN',
+      'ANTHROPIC_API_KEY',
+      'ISSUE_NUMBER',
+      'REPOSITORY'
+    ];
+
+    const missing = required.filter(env => !process.env[env]);
+    if (missing.length > 0) {
+      throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    }
+
+    // Validate repository format
+    if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(process.env.REPOSITORY)) {
+      throw new Error(`Invalid repository format: ${process.env.REPOSITORY}`);
+    }
+
+    // Validate issue number
+    if (!/^\d+$/.test(process.env.ISSUE_NUMBER)) {
+      throw new Error(`Invalid issue number: ${process.env.ISSUE_NUMBER}`);
+    }
+  }
+
+  sanitizeTitle(title) {
+    // Remove control characters and limit length
+    return title
+      .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
+      .replace(/[^\w\s-]/g, '') // Keep only word chars, spaces, hyphens
+      .trim()
+      .substring(0, 100); // Limit length
+  }
+
+  createSafeBranchName(issueNumber) {
+    // Create a safe branch name
+    const sanitized = this.sanitizeTitle(this.issueTitle)
+      .toLowerCase()
+      .replace(/\s+/g, '-') // Replace spaces with hyphens
+      .replace(/-+/g, '-') // Replace multiple hyphens with single
+      .replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
+
+    return `ai/issue-${issueNumber}${sanitized ? '-' + sanitized : ''}`;
   }
 
   log(message, level = 'info') {
@@ -33,20 +80,56 @@ class DevAgent {
     this.log(`API key present: ${!!process.env.ANTHROPIC_API_KEY}`);
 
     try {
-      const command = `claude -p "${prompt.replace(/"/g, '\\"')}" --allowedTools "${allowedTools}" --permission-mode acceptEdits --output-format json`;
-      this.log(`Executing: ${command.substring(0, 150)}...`);
+      // Write prompt to temporary file to avoid shell escaping issues
+      const promptFile = path.join(this.logDir, 'prompt.txt');
+      fs.writeFileSync(promptFile, prompt, 'utf8');
+      this.log(`Wrote prompt to file: ${promptFile}`);
 
-      const result = execSync(command, {
+      const args = [
+        '-p', `@${promptFile}`,
+        '--allowedTools', allowedTools,
+        '--permission-mode', 'acceptEdits',
+        '--output-format', 'json'
+      ];
+
+      this.log(`Executing: claude ${args.join(' ')}`);
+
+      const result = spawnSync('claude', args, {
         env: {
           ...process.env,
           ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
         },
         encoding: 'utf8',
-        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        maxBuffer: 20 * 1024 * 1024, // 20MB buffer (increased)
       });
 
-      this.log(`Claude raw output length: ${result.length}`);
-      const parsed = JSON.parse(result);
+      if (result.error) {
+        throw result.error;
+      }
+
+      if (result.status !== 0) {
+        throw new Error(`Claude exited with status ${result.status}: ${result.stderr}`);
+      }
+
+      const output = result.stdout;
+
+      this.log(`Claude raw output length: ${output.length}`);
+
+      // Save raw output for debugging
+      const outputFile = path.join(this.logDir, 'claude-output.json');
+      fs.writeFileSync(outputFile, output, 'utf8');
+      this.log(`Saved raw output to: ${outputFile}`);
+
+      // Parse JSON with proper error handling
+      let parsed;
+      try {
+        parsed = JSON.parse(output);
+      } catch (jsonError) {
+        this.log(`JSON parsing failed: ${jsonError.message}`, 'error');
+        this.log(`Raw output preview: ${output.substring(0, 500)}`, 'error');
+        throw new Error(`Claude returned invalid JSON: ${jsonError.message}`);
+      }
+
       this.log(`Claude parsed successfully, messages: ${parsed.messages?.length || 0}`);
       return parsed;
     } catch (error) {
@@ -61,10 +144,19 @@ class DevAgent {
   async createBranch() {
     this.log(`Creating branch: ${this.branchName}`);
     try {
-      const result = execSync(`git checkout -b ${this.branchName}`, { encoding: 'utf8' });
-      this.log(`Branch created successfully: ${result.trim()}`);
+      // Check if branch already exists
+      try {
+        execSync(`git rev-parse --verify ${this.branchName}`, { encoding: 'utf8', stdio: 'ignore' });
+        this.log(`Branch ${this.branchName} already exists, switching to it`);
+        const result = execSync(`git checkout ${this.branchName}`, { encoding: 'utf8' });
+        this.log(`Switched to existing branch: ${result.trim()}`);
+      } catch {
+        // Branch doesn't exist, create it
+        const result = execSync(`git checkout -b ${this.branchName}`, { encoding: 'utf8' });
+        this.log(`Branch created successfully: ${result.trim()}`);
+      }
     } catch (error) {
-      this.log(`Failed to create branch: ${error.message}`, 'error');
+      this.log(`Failed to create/switch branch: ${error.message}`, 'error');
       throw error;
     }
   }
@@ -84,13 +176,24 @@ Fixes #${this.issueNumber}
 🤖 Generated with DevAgent
 Co-Authored-By: ${process.env.GIT_USER_NAME || 'DevAgent'} <${process.env.GIT_USER_EMAIL || 'devagent@github-actions.local'}>`;
 
+      // Write commit message to file to avoid shell escaping issues
+      const commitMsgFile = path.join(this.logDir, 'commit-message.txt');
+      fs.writeFileSync(commitMsgFile, commitMessage, 'utf8');
+
       this.log(`Committing with message: ${commitMessage.substring(0, 100)}...`);
-      const commitResult = execSync(`git commit -m "${commitMessage}"`, { encoding: 'utf8' });
+      const commitResult = execSync(`git commit -F "${commitMsgFile}"`, { encoding: 'utf8' });
       this.log(`Git commit result: ${commitResult.trim()}`);
 
       this.log(`Pushing to origin/${this.branchName}...`);
-      const pushResult = execSync(`git push -u origin ${this.branchName}`, { encoding: 'utf8' });
-      this.log(`Git push result: ${pushResult.trim()}`);
+      try {
+        const pushResult = execSync(`git push -u origin "${this.branchName}"`, { encoding: 'utf8' });
+        this.log(`Git push result: ${pushResult.trim()}`);
+      } catch (pushError) {
+        // Retry push without -u flag in case branch already exists on remote
+        this.log('Retrying push without -u flag...', 'warn');
+        const retryResult = execSync(`git push origin "${this.branchName}"`, { encoding: 'utf8' });
+        this.log(`Git push retry result: ${retryResult.trim()}`);
+      }
     } catch (error) {
       this.log(`Git operation failed: ${error.message}`, 'error');
       this.log(`Git error stderr: ${error.stderr || 'none'}`, 'error');
@@ -124,7 +227,7 @@ Fixes #${this.issueNumber}
 
 Co-Authored-By: ${process.env.GIT_USER_NAME || 'DevAgent'} <${process.env.GIT_USER_EMAIL || 'devagent@github-actions.local'}>`;
 
-      const prTitle = `[${this.issueNumber}] ${this.issueTitle}`;
+      const prTitle = `[AI Fix] ${this.issueTitle || `Issue #${this.issueNumber}`}`;
       this.log(`PR title: ${prTitle}`);
       this.log(`PR body length: ${prBody.length}`);
 
