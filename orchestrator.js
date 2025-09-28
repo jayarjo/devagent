@@ -74,10 +74,102 @@ class DevAgent {
     fs.appendFileSync(path.join(this.logDir, 'devagent.log'), logMessage);
   }
 
+  checkForRateLimiting(output) {
+    const rateLimitIndicators = [
+      'rate limit',
+      'usage limit',
+      'quota exceeded',
+      'try again later',
+      'too many requests',
+      'limit exceeded',
+      'please wait',
+      'retry after',
+      'throttled'
+    ];
+
+    const lowerOutput = output.toLowerCase();
+    for (const indicator of rateLimitIndicators) {
+      if (lowerOutput.includes(indicator)) {
+        this.log(`🚨 Rate limiting detected in output: "${indicator}"`, 'warn');
+        this.log(`Full rate limiting message: ${output.substring(0, 500)}`, 'warn');
+
+        // Extract any retry time if mentioned
+        const retryMatch = output.match(/(\d+)\s*(minutes?|hours?|seconds?)/i);
+        if (retryMatch) {
+          this.log(`⏱️  Suggested retry time: ${retryMatch[0]}`, 'warn');
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  isRateLimitError(error) {
+    if (!error) return false;
+
+    const errorStr = JSON.stringify(error).toLowerCase();
+    const rateLimitCodes = [
+      'rate_limit',
+      'usage_limit',
+      'quota_exceeded',
+      'too_many_requests',
+      'throttled',
+      '429'
+    ];
+
+    return rateLimitCodes.some(code => errorStr.includes(code));
+  }
+
+  validateClaudeCLI() {
+    try {
+      // Check if Claude CLI is available
+      this.log('Checking Claude CLI availability...');
+      const versionResult = spawnSync('claude', ['--version'], {
+        encoding: 'utf8',
+        timeout: 5000
+      });
+
+      if (versionResult.error) {
+        throw new Error(`Claude CLI not found: ${versionResult.error.message}`);
+      }
+
+      if (versionResult.status !== 0) {
+        throw new Error(`Claude CLI version check failed with status ${versionResult.status}`);
+      }
+
+      this.log(`Claude CLI available: ${versionResult.stdout.trim()}`);
+
+      // Check authentication by running a minimal command
+      this.log('Checking Claude CLI authentication...');
+      const authResult = spawnSync('claude', ['-p', 'hello', '--output-format', 'json'], {
+        encoding: 'utf8',
+        timeout: 10000,
+        env: {
+          ...process.env,
+          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        }
+      });
+
+      if (authResult.status !== 0) {
+        this.log(`Auth check failed. stdout: ${authResult.stdout}`, 'error');
+        this.log(`Auth check failed. stderr: ${authResult.stderr}`, 'error');
+        throw new Error(`Claude CLI authentication failed. Status: ${authResult.status}`);
+      }
+
+      this.log('Claude CLI authentication successful');
+    } catch (error) {
+      this.log(`Claude CLI validation failed: ${error.message}`, 'error');
+      throw error;
+    }
+  }
+
   async runClaude(prompt, allowedTools = 'Bash,Read,Edit,Write,Glob,Grep') {
     this.log(`Running Claude with prompt: ${prompt.substring(0, 100)}...`);
     this.log(`Allowed tools: ${allowedTools}`);
     this.log(`API key present: ${!!process.env.ANTHROPIC_API_KEY}`);
+
+    // Validate Claude CLI before attempting to use it
+    this.validateClaudeCLI();
 
     try {
       // Write prompt to temporary file to avoid shell escaping issues
@@ -94,6 +186,10 @@ class DevAgent {
 
       this.log(`Executing: claude ${args.join(' ')}`);
 
+      // Set reasonable timeout (5 minutes) to avoid hanging indefinitely
+      const timeoutMs = 5 * 60 * 1000; // 5 minutes
+      this.log(`Setting ${timeoutMs/1000}s timeout for Claude execution`);
+
       const result = spawnSync('claude', args, {
         env: {
           ...process.env,
@@ -101,14 +197,68 @@ class DevAgent {
         },
         encoding: 'utf8',
         maxBuffer: 20 * 1024 * 1024, // 20MB buffer (increased)
+        timeout: timeoutMs
       });
 
       if (result.error) {
+        this.log(`Claude spawn error: ${result.error.message}`, 'error');
+        this.log(`Error code: ${result.error.code}`, 'error');
+        this.log(`Error errno: ${result.error.errno}`, 'error');
+
+        // Check for timeout specifically
+        if (result.error.code === 'TIMEOUT') {
+          throw new Error(`Claude CLI timed out after ${timeoutMs/1000}s. This could be due to:\n` +
+            `- Rate limiting (Claude API usage limits reached)\n` +
+            `- Network issues\n` +
+            `- Large prompt processing\n` +
+            `Consider trying again later or checking your API usage limits.`);
+        }
+
         throw result.error;
       }
 
       if (result.status !== 0) {
-        throw new Error(`Claude exited with status ${result.status}: ${result.stderr}`);
+        this.log(`Claude process details:`, 'error');
+        this.log(`  Exit status: ${result.status}`, 'error');
+        this.log(`  Signal: ${result.signal || 'none'}`, 'error');
+        this.log(`  stdout length: ${result.stdout?.length || 0}`, 'error');
+        this.log(`  stderr length: ${result.stderr?.length || 0}`, 'error');
+
+        if (result.stdout) {
+          this.log(`Claude stdout:`, 'error');
+          this.log(result.stdout, 'error');
+        }
+
+        if (result.stderr) {
+          this.log(`Claude stderr:`, 'error');
+          this.log(result.stderr, 'error');
+        }
+
+        // Save outputs for debugging
+        if (result.stdout) {
+          fs.writeFileSync(path.join(this.logDir, 'claude-stdout.txt'), result.stdout, 'utf8');
+        }
+        if (result.stderr) {
+          fs.writeFileSync(path.join(this.logDir, 'claude-stderr.txt'), result.stderr, 'utf8');
+        }
+
+        // Check for common issues
+        let errorHint = '';
+        if (result.status === 1) {
+          errorHint = ' (common causes: authentication failure, rate limits, invalid prompt, or permission issues)';
+        } else if (result.status === 127) {
+          errorHint = ' (command not found - Claude CLI may not be installed)';
+        } else if (result.status === 130) {
+          errorHint = ' (interrupted by signal)';
+        }
+
+        // Check for rate limiting in stderr
+        const stderrText = result.stderr || '';
+        if (stderrText.includes('rate limit') || stderrText.includes('usage limit') || stderrText.includes('quota')) {
+          errorHint += '\n⚠️  This appears to be a rate limiting issue. Claude API has usage limits that may cause delays up to several hours.';
+        }
+
+        throw new Error(`Claude exited with status ${result.status}${errorHint}. Check logs for details.`);
       }
 
       const output = result.stdout;
@@ -120,6 +270,9 @@ class DevAgent {
       fs.writeFileSync(outputFile, output, 'utf8');
       this.log(`Saved raw output to: ${outputFile}`);
 
+      // Check for rate limiting or error messages in the output before parsing
+      this.checkForRateLimiting(output);
+
       // Parse JSON with proper error handling
       let parsed;
       try {
@@ -127,7 +280,24 @@ class DevAgent {
       } catch (jsonError) {
         this.log(`JSON parsing failed: ${jsonError.message}`, 'error');
         this.log(`Raw output preview: ${output.substring(0, 500)}`, 'error');
+
+        // Check if the output contains rate limiting info instead of JSON
+        if (output.includes('rate limit') || output.includes('usage limit') ||
+            output.includes('quota exceeded') || output.includes('try again later')) {
+          this.log(`⚠️  Output contains rate limiting message instead of JSON`, 'error');
+          throw new Error(`Claude API rate limited. Output: ${output.substring(0, 200)}...`);
+        }
+
         throw new Error(`Claude returned invalid JSON: ${jsonError.message}`);
+      }
+
+      // Check parsed response for error indicators
+      if (parsed.error) {
+        this.log(`Claude returned error in response: ${JSON.stringify(parsed.error)}`, 'error');
+        if (this.isRateLimitError(parsed.error)) {
+          throw new Error(`Claude API rate limited: ${parsed.error.message || JSON.stringify(parsed.error)}`);
+        }
+        throw new Error(`Claude API error: ${parsed.error.message || JSON.stringify(parsed.error)}`);
       }
 
       this.log(`Claude parsed successfully, messages: ${parsed.messages?.length || 0}`);

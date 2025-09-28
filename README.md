@@ -13,12 +13,26 @@ DevAgent is a reusable GitHub Action that:
 
 ## Quick Start
 
-### 1. Set up Secrets
+### 1. Set up Repository Settings
+
+#### Required GitHub Actions Settings
+
+**For Organization Repositories:**
+1. Go to `https://github.com/organizations/YOUR_ORG/settings/actions`
+2. Enable "Allow GitHub Actions to create and approve pull requests"
+3. Go to your repository Settings → Actions → General
+4. Enable "Allow GitHub Actions to create and approve pull requests"
+
+**For Personal Repositories:**
+1. Go to your repository Settings → Actions → General
+2. Under "Workflow permissions", select "Read and write permissions"
+3. Enable "Allow GitHub Actions to create and approve pull requests"
+
+#### Set up Secrets
 
 In your repository, add these secrets (Settings → Secrets and variables → Actions):
 
 - `ANTHROPIC_API_KEY` - Your Anthropic API key for Claude
-- `GITHUB_TOKEN` - GitHub token with `contents:write` and `pull_requests:write` permissions
 
 ### 2. Create Workflow Files
 
@@ -34,6 +48,10 @@ on:
 jobs:
   check-ai-fix-label:
     if: contains(github.event.issue.labels.*.name, 'ai-fix')
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
     uses: jayarjo/devagent/.github/workflows/devagent.yml@main
     with:
       issue_number: ${{ github.event.issue.number }}
@@ -271,15 +289,34 @@ DevAgent works with any codebase but has enhanced support for:
 
 ## Troubleshooting
 
+### Issue: "GitHub Actions is not permitted to create or approve pull requests"
+**Solution:** Enable the required repository settings (see setup section above)
+- For organizations: Enable at organization level first, then repository level
+- For personal repos: Enable in repository Settings → Actions → General
+- If the option is grayed out, check higher-level permissions (organization/enterprise)
+
 ### Issue: DevAgent didn't trigger
 - Check that the `ai-fix` label was added
-- Verify workflow file syntax
+- Verify workflow file syntax and permissions block
 - Check Actions tab for errors
 
 ### Issue: No changes made
 - Issue may be too vague or complex
 - Check DevAgent logs in Actions artifacts
 - Try breaking down the issue into smaller parts
+
+### Issue: "Claude exited with status 1" or timeouts
+**Common causes:**
+- **Rate limiting**: Claude API has usage limits - may cause delays up to several hours
+- **Authentication**: Check your `ANTHROPIC_API_KEY` is valid
+- **Large prompts**: Complex codebases may hit processing limits
+- **Network issues**: Temporary connectivity problems
+
+**Solutions:**
+- Wait and retry later if rate limited
+- Check your Anthropic Console for usage limits
+- Break down complex issues into smaller parts
+- Verify API key has sufficient credits/permissions
 
 ### Issue: CI failures
 - DevAgent will comment on the PR with failure details
