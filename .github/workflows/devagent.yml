@@ -1,0 +1,84 @@
+name: 'DevAgent - AI Issue Fix'
+description: 'Automatically generates fixes for issues labeled with ai-fix using Claude'
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: 'Issue number to fix'
+        required: true
+        type: string
+      repository:
+        description: 'Repository name (owner/repo)'
+        required: true
+        type: string
+      base_branch:
+        description: 'Base branch to create PR against'
+        required: false
+        type: string
+        default: 'main'
+      git_user_name:
+        description: 'Git commit author name'
+        required: false
+        type: string
+        default: 'DevAgent'
+      git_user_email:
+        description: 'Git commit author email'
+        required: false
+        type: string
+        default: 'devagent@github-actions.local'
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: 'Anthropic API key for Claude'
+        required: true
+      GITHUB_TOKEN:
+        description: 'GitHub token with repo write access'
+        required: true
+
+jobs:
+  devagent-fix:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/devagent:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Get issue details
+      id: issue
+      run: |
+        ISSUE_DATA=$(gh api repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }})
+        echo "title=$(echo "$ISSUE_DATA" | jq -r '.title')" >> $GITHUB_OUTPUT
+        echo "body<<EOF" >> $GITHUB_OUTPUT
+        echo "$ISSUE_DATA" | jq -r '.body' >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run DevAgent
+      run: |
+        node /app/orchestrator.js
+      env:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        ISSUE_TITLE: ${{ steps.issue.outputs.title }}
+        ISSUE_BODY: ${{ steps.issue.outputs.body }}
+        REPOSITORY: ${{ inputs.repository }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        GIT_USER_NAME: ${{ inputs.git_user_name }}
+        GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: devagent-logs-${{ inputs.issue_number }}
+        path: /tmp/agent-logs/

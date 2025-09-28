@@ -1,0 +1,15 @@
+{
+  "name": "@jayarjo/devagent",
+  "version": "1.0.0",
+  "description": "AI-powered GitHub agent for automatic issue fixes",
+  "main": "orchestrator.js",
+  "scripts": {
+    "start": "node orchestrator.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "20.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
