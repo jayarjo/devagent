@@ -35,6 +35,10 @@ on:
 jobs:
   devagent-fix:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
     container:
       image: ghcr.io/jayarjo/devagent:latest
       credentials:
