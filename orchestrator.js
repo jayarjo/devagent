@@ -141,8 +141,25 @@ class DevAgent {
     }
   }
 
+  setupGitSafety() {
+    try {
+      // Fix git safe directory issue
+      const cwd = process.cwd();
+      this.log(`Setting up git safe directory for: ${cwd}`);
+      execSync(`git config --global --add safe.directory "${cwd}"`, { encoding: 'utf8' });
+      execSync('git config --global --add safe.directory "*"', { encoding: 'utf8' });
+      this.log('Git safe directory configured');
+    } catch (error) {
+      this.log(`Warning: Failed to configure git safe directory: ${error.message}`, 'warn');
+    }
+  }
+
   async createBranch() {
     this.log(`Creating branch: ${this.branchName}`);
+
+    // Setup git safety first
+    this.setupGitSafety();
+
     try {
       // Check if branch already exists
       try {
