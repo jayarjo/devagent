@@ -31,9 +31,6 @@ on:
       ANTHROPIC_API_KEY:
         description: 'Anthropic API key for Claude'
         required: true
-      GITHUB_TOKEN:
-        description: 'GitHub token with repo write access'
-        required: true
 
 jobs:
   devagent-fix:
