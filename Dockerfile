@@ -24,10 +24,10 @@ RUN npm install -g @anthropic-ai/claude-code
 WORKDIR /app
 
 # Copy package files first for better caching
-COPY package.json package-lock.json* ./
+COPY package.json ./
 
 # Install Node dependencies
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # Copy application code
 COPY orchestrator.js ./
