@@ -20,7 +20,7 @@ In your repository, add these secrets (Settings → Secrets and variables → Ac
 - `ANTHROPIC_API_KEY` - Your Anthropic API key for Claude
 - `GITHUB_TOKEN` - GitHub token with `contents:write` and `pull_requests:write` permissions
 
-### 2. Create Workflow File
+### 2. Create Workflow Files
 
 Create `.github/workflows/devagent-trigger.yml` in your repository:
 
@@ -44,15 +44,115 @@ jobs:
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Optional: CI feedback workflow
-  ci-feedback:
-    uses: jayarjo/devagent/.github/workflows/ci-feedback.yml@main
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### 3. Use DevAgent
+### 3. Optional: Add CI Feedback
+
+To get feedback when DevAgent PRs fail CI, create `.github/workflows/devagent-ci-feedback.yml`:
+
+```yaml
+name: 'DevAgent CI Feedback'
+description: 'Posts feedback comments on DevAgent PRs when CI fails'
+
+on:
+  workflow_run:
+    workflows: ["CI"]  # Replace with your CI workflow name
+    types: [completed]
+
+jobs:
+  ci-feedback:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+
+    steps:
+    - name: Get PR number
+      id: pr
+      run: |
+        # Get PR associated with the workflow run
+        PR_NUMBER=$(gh api repos/${{ github.repository }}/pulls \
+          --jq ".[] | select(.head.sha == \"${{ github.event.workflow_run.head_sha }}\") | .number")
+
+        if [ -z "$PR_NUMBER" ]; then
+          echo "No PR found for commit ${{ github.event.workflow_run.head_sha }}"
+          exit 0
+        fi
+
+        echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Check if DevAgent PR
+      id: check
+      run: |
+        if [ -n "${{ steps.pr.outputs.number }}" ]; then
+          PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }})
+          BRANCH_NAME=$(echo "$PR_DATA" | jq -r '.head.ref')
+
+          if [[ "$BRANCH_NAME" == ai/issue-* ]]; then
+            echo "is_devagent=true" >> $GITHUB_OUTPUT
+            echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "is_devagent=false" >> $GITHUB_OUTPUT
+          fi
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Get workflow run logs
+      id: logs
+      if: steps.check.outputs.is_devagent == 'true'
+      run: |
+        # Get failed job logs
+        JOBS=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/jobs \
+          --jq '.jobs[] | select(.conclusion == "failure") | .id')
+
+        SUMMARY=""
+        for job_id in $JOBS; do
+          JOB_NAME=$(gh api repos/${{ github.repository }}/actions/jobs/$job_id --jq '.name')
+          LOGS=$(gh api repos/${{ github.repository }}/actions/jobs/$job_id/logs 2>/dev/null | tail -20 | head -10)
+
+          SUMMARY+="## Failed Job: $JOB_NAME"$'\n\n'
+          SUMMARY+='```'$'\n'
+          SUMMARY+="$LOGS"$'\n'
+          SUMMARY+='```'$'\n\n'
+        done
+
+        # Save to file to handle multiline content
+        echo "$SUMMARY" > /tmp/ci_summary.md
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Post CI feedback comment
+      if: steps.check.outputs.is_devagent == 'true'
+      run: |
+        # Build comment body with proper escaping
+        cat > /tmp/comment.md << 'EOF'
+        ## 🚨 CI Failure Detected
+
+        The automated tests failed for this DevAgent PR. Here's a summary of the failures:
+
+        EOF
+
+        # Append CI summary
+        cat /tmp/ci_summary.md >> /tmp/comment.md
+
+        cat >> /tmp/comment.md << EOF
+
+        ### Next Steps
+        - The DevAgent may need manual intervention to fix these issues
+        - Consider reviewing the test failures and updating the fix accordingly
+        - You can trigger a retry by pushing new commits to the \`${{ steps.check.outputs.branch }}\` branch
+
+        ---
+        🤖 Posted by DevAgent CI Feedback
+        EOF
+
+        gh pr comment ${{ steps.pr.outputs.number }} --body-file /tmp/comment.md
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### 4. Use DevAgent
 
 1. Create an issue describing a bug or feature request
 2. Add the `ai-fix` label to the issue
