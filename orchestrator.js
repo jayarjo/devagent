@@ -29,54 +29,85 @@ class DevAgent {
 
   async runClaude(prompt, allowedTools = 'Bash,Read,Edit,Write,Glob,Grep') {
     this.log(`Running Claude with prompt: ${prompt.substring(0, 100)}...`);
+    this.log(`Allowed tools: ${allowedTools}`);
+    this.log(`API key present: ${!!process.env.ANTHROPIC_API_KEY}`);
 
     try {
-      const result = execSync(
-        `claude -p "${prompt.replace(/"/g, '\\"')}" --allowedTools "${allowedTools}" --permission-mode acceptEdits --output-format json`,
-        {
-          env: {
-            ...process.env,
-            ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-          },
-          encoding: 'utf8',
-          maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-        }
-      );
+      const command = `claude -p "${prompt.replace(/"/g, '\\"')}" --allowedTools "${allowedTools}" --permission-mode acceptEdits --output-format json`;
+      this.log(`Executing: ${command.substring(0, 150)}...`);
 
-      return JSON.parse(result);
+      const result = execSync(command, {
+        env: {
+          ...process.env,
+          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        },
+        encoding: 'utf8',
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+      });
+
+      this.log(`Claude raw output length: ${result.length}`);
+      const parsed = JSON.parse(result);
+      this.log(`Claude parsed successfully, messages: ${parsed.messages?.length || 0}`);
+      return parsed;
     } catch (error) {
       this.log(`Claude execution failed: ${error.message}`, 'error');
+      this.log(`Error code: ${error.code}`, 'error');
+      this.log(`Error stderr: ${error.stderr || 'none'}`, 'error');
+      this.log(`Error stdout: ${error.stdout || 'none'}`, 'error');
       throw error;
     }
   }
 
   async createBranch() {
     this.log(`Creating branch: ${this.branchName}`);
-    execSync(`git checkout -b ${this.branchName}`, { encoding: 'utf8' });
+    try {
+      const result = execSync(`git checkout -b ${this.branchName}`, { encoding: 'utf8' });
+      this.log(`Branch created successfully: ${result.trim()}`);
+    } catch (error) {
+      this.log(`Failed to create branch: ${error.message}`, 'error');
+      throw error;
+    }
   }
 
   async commitAndPush() {
     this.log('Committing changes');
 
-    execSync('git add .', { encoding: 'utf8' });
+    try {
+      this.log('Adding files to git...');
+      const addResult = execSync('git add .', { encoding: 'utf8' });
+      this.log(`Git add result: ${addResult || 'success'}`);
 
-    const commitMessage = `[AI Fix] ${this.issueTitle}
+      const commitMessage = `[AI Fix] ${this.issueTitle}
 
 Fixes #${this.issueNumber}
 
 🤖 Generated with DevAgent
 Co-Authored-By: ${process.env.GIT_USER_NAME || 'DevAgent'} <${process.env.GIT_USER_EMAIL || 'devagent@github-actions.local'}>`;
 
-    execSync(`git commit -m "${commitMessage}"`, { encoding: 'utf8' });
-    execSync(`git push -u origin ${this.branchName}`, { encoding: 'utf8' });
+      this.log(`Committing with message: ${commitMessage.substring(0, 100)}...`);
+      const commitResult = execSync(`git commit -m "${commitMessage}"`, { encoding: 'utf8' });
+      this.log(`Git commit result: ${commitResult.trim()}`);
+
+      this.log(`Pushing to origin/${this.branchName}...`);
+      const pushResult = execSync(`git push -u origin ${this.branchName}`, { encoding: 'utf8' });
+      this.log(`Git push result: ${pushResult.trim()}`);
+    } catch (error) {
+      this.log(`Git operation failed: ${error.message}`, 'error');
+      this.log(`Git error stderr: ${error.stderr || 'none'}`, 'error');
+      throw error;
+    }
   }
 
   async createPR() {
     this.log('Creating pull request');
 
-    const [owner, repo] = this.repository.split('/');
+    try {
+      const [owner, repo] = this.repository.split('/');
+      this.log(`Repository: ${owner}/${repo}`);
+      this.log(`Base branch: ${this.baseBranch}`);
+      this.log(`Head branch: ${this.branchName}`);
 
-    const prBody = `## Summary
+      const prBody = `## Summary
 This PR addresses the issue described in #${this.issueNumber}.
 
 ## Changes Made
@@ -93,32 +124,54 @@ Fixes #${this.issueNumber}
 
 Co-Authored-By: ${process.env.GIT_USER_NAME || 'DevAgent'} <${process.env.GIT_USER_EMAIL || 'devagent@github-actions.local'}>`;
 
-    const pr = await this.octokit.pulls.create({
-      owner,
-      repo,
-      title: `[${this.issueNumber}] ${this.issueTitle}`,
-      head: this.branchName,
-      base: this.baseBranch,
-      body: prBody,
-    });
+      const prTitle = `[${this.issueNumber}] ${this.issueTitle}`;
+      this.log(`PR title: ${prTitle}`);
+      this.log(`PR body length: ${prBody.length}`);
 
-    this.log(`Created PR #${pr.data.number}: ${pr.data.html_url}`);
-    return pr.data;
+      const pr = await this.octokit.pulls.create({
+        owner,
+        repo,
+        title: prTitle,
+        head: this.branchName,
+        base: this.baseBranch,
+        body: prBody,
+      });
+
+      this.log(`Created PR #${pr.data.number}: ${pr.data.html_url}`);
+      return pr.data;
+    } catch (error) {
+      this.log(`Failed to create PR: ${error.message}`, 'error');
+      this.log(`PR creation error status: ${error.status}`, 'error');
+      this.log(`PR creation error response: ${JSON.stringify(error.response?.data || {})}`, 'error');
+      throw error;
+    }
   }
 
   async run() {
     try {
       this.log('Starting DevAgent execution');
       this.log(`Issue: #${this.issueNumber} - ${this.issueTitle}`);
+      this.log(`Repository: ${this.repository}`);
+      this.log(`Base branch: ${this.baseBranch}`);
+      this.log(`Working directory: ${process.cwd()}`);
+
+      // Log environment variables (without sensitive data)
+      this.log(`Environment check:`);
+      this.log(`- GITHUB_TOKEN present: ${!!process.env.GITHUB_TOKEN}`);
+      this.log(`- ANTHROPIC_API_KEY present: ${!!process.env.ANTHROPIC_API_KEY}`);
+      this.log(`- GIT_USER_NAME: ${process.env.GIT_USER_NAME || 'default'}`);
+      this.log(`- GIT_USER_EMAIL: ${process.env.GIT_USER_EMAIL || 'default'}`);
 
       // Create working branch
       await this.createBranch();
 
       // Prepare context for Claude
+      this.log('Gathering repository context...');
       const fileTree = execSync(
         'find . -type f -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.go" -o -name "*.java" -o -name "*.cpp" -o -name "*.c" | head -50',
         { encoding: 'utf8' }
       );
+      this.log(`Found ${fileTree.split('\n').filter(line => line.trim()).length} relevant files`);
 
       const prompt = `You are DevAgent, an AI assistant that fixes GitHub issues.
 
@@ -142,14 +195,16 @@ TASK:
 
 Please start by exploring the codebase to understand the issue better, then implement the necessary fixes.`;
 
+      this.log(`Prompt length: ${prompt.length} characters`);
+
       // Run Claude to fix the issue
       const result = await this.runClaude(prompt);
-      this.log(
-        `Claude completed with ${result.messages?.length || 0} messages`
-      );
+      this.log(`Claude completed with ${result.messages?.length || 0} messages`);
 
       // Check if any changes were made
+      this.log('Checking for file changes...');
       const status = execSync('git status --porcelain', { encoding: 'utf8' });
+      this.log(`Git status output: ${status || '(no changes)'}`);
 
       if (status.trim()) {
         this.log('Changes detected, creating PR');
@@ -161,6 +216,7 @@ Please start by exploring the codebase to understand the issue better, then impl
       }
     } catch (error) {
       this.log(`DevAgent execution failed: ${error.message}`, 'error');
+      this.log(`Error stack: ${error.stack}`, 'error');
       process.exit(1);
     }
   }
