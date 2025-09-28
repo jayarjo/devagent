@@ -51,14 +51,12 @@ jobs:
     - name: Get issue details
       id: issue
       run: |
-        ISSUE_DATA=$(gh api repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }})
+        # Use template to get clean text output instead of JSON
+        TITLE=$(gh api repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }} --template '{{.title}}')
+        BODY=$(gh api repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }} --template '{{.body}}')
 
-        # Extract title safely
-        TITLE=$(echo "$ISSUE_DATA" | jq -r '.title // ""')
         echo "title=$TITLE" >> $GITHUB_OUTPUT
 
-        # Extract body safely with proper escaping
-        BODY=$(echo "$ISSUE_DATA" | jq -r '.body // ""' | sed 's/%/%%/g' | sed 's/\r//g')
         echo "body<<DEVAGENT_EOF" >> $GITHUB_OUTPUT
         echo "$BODY" >> $GITHUB_OUTPUT
         echo "DEVAGENT_EOF" >> $GITHUB_OUTPUT
