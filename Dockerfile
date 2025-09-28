@@ -30,7 +30,6 @@ COPY package.json package-lock.json* ./
 RUN npm ci --only=production
 
 # Copy application code
-COPY src/ ./src/
 COPY orchestrator.js ./
 
 # Create logs directory
