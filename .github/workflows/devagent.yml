@@ -48,6 +48,9 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
 
+    - name: Configure git safe directory
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
     - name: Get issue details
       id: issue
       run: |
