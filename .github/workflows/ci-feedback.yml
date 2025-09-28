@@ -72,20 +72,28 @@ jobs:
     - name: Post CI feedback comment
       if: steps.check.outputs.is_devagent == 'true'
       run: |
-        COMMENT_BODY="## 🚨 CI Failure Detected
+        # Build comment body with proper escaping
+        cat > /tmp/comment.md << 'EOF'
+        ## 🚨 CI Failure Detected
 
-The automated tests failed for this DevAgent PR. Here's a summary of the failures:
+        The automated tests failed for this DevAgent PR. Here's a summary of the failures:
 
-$(cat /tmp/ci_summary.md)
+        EOF
 
-### Next Steps
-- The DevAgent may need manual intervention to fix these issues
-- Consider reviewing the test failures and updating the fix accordingly
-- You can trigger a retry by pushing new commits to the \`${{ steps.check.outputs.branch }}\` branch
+        # Append CI summary
+        cat /tmp/ci_summary.md >> /tmp/comment.md
 
----
-🤖 Posted by DevAgent CI Feedback"
+        cat >> /tmp/comment.md << EOF
 
-        gh pr comment ${{ steps.pr.outputs.number }} --body "$COMMENT_BODY"
+        ### Next Steps
+        - The DevAgent may need manual intervention to fix these issues
+        - Consider reviewing the test failures and updating the fix accordingly
+        - You can trigger a retry by pushing new commits to the \`${{ steps.check.outputs.branch }}\` branch
+
+        ---
+        🤖 Posted by DevAgent CI Feedback
+        EOF
+
+        gh pr comment ${{ steps.pr.outputs.number }} --body-file /tmp/comment.md
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
