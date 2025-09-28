@@ -31,11 +31,17 @@ class DevAgent {
     this.log(`Running Claude with prompt: ${prompt.substring(0, 100)}...`);
 
     try {
-      const result = execSync(`claude -p "${prompt.replace(/"/g, '\\"')}" --allowedTools "${allowedTools}" --permission-mode acceptEdits --output-format json`, {
-        env: { ...process.env, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
-        encoding: 'utf8',
-        maxBuffer: 10 * 1024 * 1024 // 10MB buffer
-      });
+      const result = execSync(
+        `claude -p "${prompt.replace(/"/g, '\\"')}" --allowedTools "${allowedTools}" --permission-mode acceptEdits --output-format json`,
+        {
+          env: {
+            ...process.env,
+            ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+          },
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        }
+      );
 
       return JSON.parse(result);
     } catch (error) {
@@ -59,7 +65,7 @@ class DevAgent {
 Fixes #${this.issueNumber}
 
 🤖 Generated with DevAgent
-Co-Authored-By: Claude <noreply@anthropic.com>`;
+Co-Authored-By: ${process.env.GIT_USER_NAME || 'DevAgent'} <${process.env.GIT_USER_EMAIL || 'devagent@github-actions.local'}>`;
 
     execSync(`git commit -m "${commitMessage}"`, { encoding: 'utf8' });
     execSync(`git push -u origin ${this.branchName}`, { encoding: 'utf8' });
@@ -83,17 +89,17 @@ The AI agent analyzed the issue and implemented the following changes:
 Fixes #${this.issueNumber}
 
 ---
-🤖 Generated with [DevAgent](https://github.com/your-org/devagent)
+🤖 Generated with [DevAgent](https://github.com/jayarjo/devagent)
 
-Co-Authored-By: Claude <noreply@anthropic.com>`;
+Co-Authored-By: ${process.env.GIT_USER_NAME || 'DevAgent'} <${process.env.GIT_USER_EMAIL || 'devagent@github-actions.local'}>`;
 
     const pr = await this.octokit.pulls.create({
       owner,
       repo,
-      title: `[AI Fix] ${this.issueTitle}`,
+      title: `[${this.issueNumber}] ${this.issueTitle}`,
       head: this.branchName,
       base: this.baseBranch,
-      body: prBody
+      body: prBody,
     });
 
     this.log(`Created PR #${pr.data.number}: ${pr.data.html_url}`);
@@ -109,7 +115,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
       await this.createBranch();
 
       // Prepare context for Claude
-      const fileTree = execSync('find . -type f -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.go" -o -name "*.java" -o -name "*.cpp" -o -name "*.c" | head -50', { encoding: 'utf8' });
+      const fileTree = execSync(
+        'find . -type f -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.go" -o -name "*.java" -o -name "*.cpp" -o -name "*.c" | head -50',
+        { encoding: 'utf8' }
+      );
 
       const prompt = `You are DevAgent, an AI assistant that fixes GitHub issues.
 
@@ -135,7 +144,9 @@ Please start by exploring the codebase to understand the issue better, then impl
 
       // Run Claude to fix the issue
       const result = await this.runClaude(prompt);
-      this.log(`Claude completed with ${result.messages?.length || 0} messages`);
+      this.log(
+        `Claude completed with ${result.messages?.length || 0} messages`
+      );
 
       // Check if any changes were made
       const status = execSync('git status --porcelain', { encoding: 'utf8' });
@@ -148,7 +159,6 @@ Please start by exploring the codebase to understand the issue better, then impl
       } else {
         this.log('No changes were made by the agent', 'warn');
       }
-
     } catch (error) {
       this.log(`DevAgent execution failed: ${error.message}`, 'error');
       process.exit(1);
@@ -159,7 +169,7 @@ Please start by exploring the codebase to understand the issue better, then impl
 // Run the agent
 if (require.main === module) {
   const agent = new DevAgent();
-  agent.run().catch(error => {
+  agent.run().catch((error) => {
     console.error('Fatal error:', error);
     process.exit(1);
   });
