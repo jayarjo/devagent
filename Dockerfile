@@ -35,11 +35,5 @@ COPY orchestrator.js ./
 # Create logs directory
 RUN mkdir -p /tmp/agent-logs
 
-# Copy entrypoint script
-COPY entrypoint.sh ./
-RUN chmod +x entrypoint.sh
-
-
 # Default command
-ENTRYPOINT ["./entrypoint.sh"]
 CMD ["node", "orchestrator.js"]
