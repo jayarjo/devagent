@@ -2,12 +2,27 @@
   "name": "@jayarjo/devagent",
   "version": "1.0.0",
   "description": "AI-powered GitHub agent for automatic issue fixes",
-  "main": "orchestrator.js",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node orchestrator.js"
+    "build": "tsc",
+    "dev": "bun run --watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@octokit/rest": "20.0.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
+    "eslint": "^9.36.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
   },
   "engines": {
     "node": ">=18"

@@ -24,16 +24,25 @@ RUN npm install -g @anthropic-ai/claude-code
 WORKDIR /app
 
 # Copy package files first for better caching
-COPY package.json ./
+COPY package.json tsconfig.json ./
 
-# Install Node dependencies
-RUN npm install --omit=dev
+# Install all dependencies (including dev for build)
+RUN npm install
 
-# Copy application code
-COPY orchestrator.js ./
+# Copy source code
+COPY src/ ./src/
+
+# Build TypeScript to JavaScript
+RUN npm run build
+
+# Remove dev dependencies after build
+RUN npm prune --production
+
+# Copy built application
+COPY dist/ ./dist/
 
 # Create logs directory
 RUN mkdir -p /tmp/agent-logs
 
 # Default command
-CMD ["node", "orchestrator.js"]
+CMD ["node", "dist/index.js"]
