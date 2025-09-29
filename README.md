@@ -105,7 +105,6 @@ jobs:
       mode: cache-update
       repository: ${{ github.repository }}
       pr_number: ${{ github.event.pull_request.number }}
-    secrets: inherit
 ```
 
 ### 4. Optional: Add CI Feedback
