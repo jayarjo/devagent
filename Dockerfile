@@ -26,20 +26,20 @@ WORKDIR /app
 # Copy package files first for better caching
 COPY package.json tsconfig.json ./
 
+# Install bun for faster builds
+RUN npm install -g bun
+
 # Install all dependencies (including dev for build)
-RUN npm install
+RUN bun install
 
 # Copy source code
 COPY src/ ./src/
 
 # Build TypeScript to JavaScript
-RUN npm run build
+RUN bun run build
 
-# Remove dev dependencies after build
-RUN npm prune --production
-
-# Copy built application
-COPY dist/ ./dist/
+# Remove dev dependencies after build (keep only production deps)
+RUN bun install --production
 
 # Create logs directory
 RUN mkdir -p /tmp/agent-logs
