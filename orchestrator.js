@@ -5,6 +5,135 @@ const { execSync, spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+class RepositoryCache {
+  constructor(repository) {
+    this.repository = repository;
+    this.cacheDir = '/tmp/devagent-cache';
+    this.ensureCacheDir();
+  }
+
+  ensureCacheDir() {
+    fs.mkdirSync(this.cacheDir, { recursive: true });
+  }
+
+  getCacheFile(name) {
+    return path.join(this.cacheDir, `${name}.json`);
+  }
+
+  isExpired(filePath, maxAgeMinutes = 30) {
+    if (!fs.existsSync(filePath)) return true;
+
+    const stat = fs.statSync(filePath);
+    const ageMinutes = (Date.now() - stat.mtime) / 1000 / 60;
+    return ageMinutes > maxAgeMinutes;
+  }
+
+  getRepositoryStructure() {
+    const cacheFile = this.getCacheFile('repo-structure');
+
+    if (!this.isExpired(cacheFile, 30)) {
+      try {
+        return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      } catch (error) {
+        console.log(`Cache read error: ${error.message}`);
+      }
+    }
+
+    return null;
+  }
+
+  saveRepositoryStructure(structure) {
+    const cacheFile = this.getCacheFile('repo-structure');
+    const cacheData = {
+      repository: this.repository,
+      timestamp: Date.now(),
+      structure
+    };
+
+    try {
+      fs.writeFileSync(cacheFile, JSON.stringify(cacheData, null, 2), 'utf8');
+    } catch (error) {
+      console.log(`Cache write error: ${error.message}`);
+    }
+  }
+
+  getFileSummaries() {
+    const cacheFile = this.getCacheFile('file-summaries');
+
+    if (!this.isExpired(cacheFile, 60 * 24 * 7)) { // 7 days
+      try {
+        return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      } catch (error) {
+        console.log(`Summaries cache read error: ${error.message}`);
+      }
+    }
+
+    return {};
+  }
+
+  saveFileSummaries(summaries) {
+    const cacheFile = this.getCacheFile('file-summaries');
+    const existing = this.getFileSummaries();
+    const merged = { ...existing, ...summaries };
+
+    const cacheData = {
+      repository: this.repository,
+      timestamp: Date.now(),
+      summaries: merged
+    };
+
+    try {
+      fs.writeFileSync(cacheFile, JSON.stringify(cacheData, null, 2), 'utf8');
+    } catch (error) {
+      console.log(`Summaries cache write error: ${error.message}`);
+    }
+  }
+
+  getIssuePatterns() {
+    const cacheFile = this.getCacheFile('issue-patterns');
+
+    if (!this.isExpired(cacheFile, 60 * 24)) { // 1 day
+      try {
+        return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      } catch (error) {
+        console.log(`Patterns cache read error: ${error.message}`);
+      }
+    }
+
+    return {};
+  }
+
+  saveFileSummary(filePath, summary) {
+    const summaries = this.getFileSummaries();
+    summaries.summaries = summaries.summaries || {};
+    summaries.summaries[filePath] = summary;
+    this.saveFileSummaries(summaries.summaries);
+  }
+
+  removeFileSummary(filePath) {
+    const summaries = this.getFileSummaries();
+    if (summaries.summaries && summaries.summaries[filePath]) {
+      delete summaries.summaries[filePath];
+      this.saveFileSummaries(summaries.summaries);
+    }
+  }
+
+  saveIssuePattern(issueType, relevantFiles) {
+    const cacheFile = this.getCacheFile('issue-patterns');
+    const existing = this.getIssuePatterns();
+
+    if (!existing.patterns) existing.patterns = {};
+    existing.patterns[issueType] = relevantFiles;
+    existing.timestamp = Date.now();
+
+    try {
+      fs.writeFileSync(cacheFile, JSON.stringify(existing, null, 2), 'utf8');
+    } catch (error) {
+      console.log(`Patterns cache write error: ${error.message}`);
+    }
+  }
+}
+
 class DevAgent {
   constructor() {
     // Validate required environment variables
@@ -18,6 +147,7 @@ class DevAgent {
     this.baseBranch = process.env.BASE_BRANCH || 'main';
     this.branchName = this.createSafeBranchName(this.issueNumber);
     this.logDir = '/tmp/agent-logs';
+    this.cache = new RepositoryCache(this.repository);
 
     // Ensure log directory exists
     fs.mkdirSync(this.logDir, { recursive: true });
@@ -118,6 +248,205 @@ class DevAgent {
     ];
 
     return rateLimitCodes.some(code => errorStr.includes(code));
+  }
+
+  getRepositoryContext() {
+    // Try to get cached repository structure
+    let cachedStructure = this.cache.getRepositoryStructure();
+
+    if (cachedStructure) {
+      this.log('Using cached repository structure');
+      return this.buildContextFromCache(cachedStructure.structure);
+    }
+
+    this.log('Analyzing repository structure...');
+
+    // Detect repository type and structure
+    const repoType = this.detectRepositoryType();
+    const relevantFiles = this.findRelevantFiles();
+    const structure = {
+      type: repoType,
+      mainLanguage: this.detectMainLanguage(),
+      relevantFiles: relevantFiles.slice(0, 20), // Limit to 20 files
+      directories: this.getKeyDirectories(),
+      configFiles: this.getConfigFiles()
+    };
+
+    // Cache the structure
+    this.cache.saveRepositoryStructure(structure);
+
+    return {
+      type: repoType,
+      relevantFiles: relevantFiles.slice(0, 20),
+      fromCache: false
+    };
+  }
+
+  buildContextFromCache(structure) {
+    return {
+      type: structure.type,
+      relevantFiles: structure.relevantFiles || [],
+      fromCache: true
+    };
+  }
+
+  detectRepositoryType() {
+    if (fs.existsSync('package.json')) {
+      const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+      if (pkg.dependencies?.react || pkg.dependencies?.next) return 'react-app';
+      if (pkg.dependencies?.express || pkg.dependencies?.fastify) return 'node-backend';
+      return 'node-project';
+    }
+    if (fs.existsSync('requirements.txt') || fs.existsSync('pyproject.toml')) return 'python-project';
+    if (fs.existsSync('go.mod')) return 'go-project';
+    if (fs.existsSync('pom.xml') || fs.existsSync('build.gradle')) return 'java-project';
+    return 'unknown';
+  }
+
+  detectMainLanguage() {
+    const extensions = ['.js', '.ts', '.py', '.go', '.java', '.cpp', '.c'];
+    const counts = {};
+
+    for (const ext of extensions) {
+      try {
+        const result = execSync(`find . -name "*${ext}" | wc -l`, { encoding: 'utf8' });
+        counts[ext] = parseInt(result.trim());
+      } catch (error) {
+        counts[ext] = 0;
+      }
+    }
+
+    const maxExt = Object.entries(counts).reduce((a, b) => counts[a[0]] > counts[b[0]] ? a : b);
+    return maxExt[0].substring(1); // Remove the dot
+  }
+
+  findRelevantFiles() {
+    // Filter files based on issue keywords and common patterns
+    const issueKeywords = this.extractIssueKeywords();
+
+    try {
+      const allFiles = execSync(
+        'find . -type f \\( -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.py" -o -name "*.go" -o -name "*.java" \\) | grep -v node_modules | grep -v ".git" | head -50',
+        { encoding: 'utf8' }
+      ).split('\n').filter(line => line.trim());
+
+      // Score files by relevance
+      const scoredFiles = allFiles.map(file => ({
+        file,
+        score: this.calculateFileRelevance(file, issueKeywords)
+      }));
+
+      // Sort by score and return top files
+      return scoredFiles
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20)
+        .map(item => item.file);
+
+    } catch (error) {
+      this.log(`Error finding files: ${error.message}`, 'warn');
+      return [];
+    }
+  }
+
+  extractIssueKeywords() {
+    const text = `${this.issueTitle} ${this.issueBody}`.toLowerCase();
+    const keywords = [];
+
+    // Extract file/path mentions
+    const fileMatches = text.match(/\b\w+\.\w+\b/g) || [];
+    keywords.push(...fileMatches);
+
+    // Extract component/function mentions
+    const componentMatches = text.match(/\b[A-Z][a-zA-Z]*\b/g) || [];
+    keywords.push(...componentMatches);
+
+    // Common technical terms
+    const techTerms = ['auth', 'api', 'route', 'component', 'service', 'util', 'config', 'model', 'controller'];
+    techTerms.forEach(term => {
+      if (text.includes(term)) keywords.push(term);
+    });
+
+    return [...new Set(keywords)]; // Remove duplicates
+  }
+
+  calculateFileRelevance(file, keywords) {
+    let score = 0;
+    const fileName = path.basename(file).toLowerCase();
+    const filePath = file.toLowerCase();
+
+    // Direct mentions in issue
+    if (this.issueBody.toLowerCase().includes(fileName)) score += 100;
+
+    // Keyword matches in filename
+    keywords.forEach(keyword => {
+      if (fileName.includes(keyword.toLowerCase())) score += 50;
+      if (filePath.includes(keyword.toLowerCase())) score += 25;
+    });
+
+    // Penalize test files unless issue mentions testing
+    if (filePath.includes('test') || filePath.includes('spec')) {
+      score -= this.issueBody.toLowerCase().includes('test') ? 0 : 30;
+    }
+
+    // Boost recently modified files
+    try {
+      const stat = fs.statSync(file);
+      const daysSinceModified = (Date.now() - stat.mtime) / (1000 * 60 * 60 * 24);
+      if (daysSinceModified < 7) score += 10;
+    } catch (error) {
+      // File might not exist
+    }
+
+    return score;
+  }
+
+  getKeyDirectories() {
+    const commonDirs = ['src', 'lib', 'components', 'pages', 'api', 'routes', 'controllers', 'services'];
+    return commonDirs.filter(dir => {
+      try {
+        return fs.statSync(dir).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  getConfigFiles() {
+    const configFiles = ['package.json', 'tsconfig.json', 'next.config.js', 'webpack.config.js', 'requirements.txt'];
+    return configFiles.filter(file => fs.existsSync(file));
+  }
+
+  buildOptimizedPrompt(context) {
+    // Build a stable prefix for Claude API caching
+    const stablePrefix = `You are DevAgent, an AI assistant that fixes GitHub issues.
+
+REPOSITORY INFO:
+Type: ${context.type}
+Project: ${this.repository}
+
+INSTRUCTIONS:
+- Make minimal, targeted changes
+- Follow existing code patterns
+- Focus on the specific issue described
+- Avoid unnecessary modifications
+
+`;
+
+    // Variable issue context (not cached)
+    const issueContext = `CURRENT ISSUE:
+Number: #${this.issueNumber}
+Title: ${this.issueTitle}
+Description:
+${this.issueBody}
+
+RELEVANT FILES:
+${context.relevantFiles.join('\n')}
+
+${context.fromCache ? '(Using cached repository analysis)' : '(Fresh repository analysis)'}
+
+TASK: Analyze the issue and implement the necessary fix. Start by exploring the most relevant files to understand the current implementation.`;
+
+    return stablePrefix + issueContext;
   }
 
   validateClaudeCLI() {
@@ -458,35 +787,12 @@ Co-Authored-By: ${process.env.GIT_USER_NAME || 'DevAgent'} <${process.env.GIT_US
       // Create working branch
       await this.createBranch();
 
-      // Prepare context for Claude
+      // Prepare context for Claude with caching
       this.log('Gathering repository context...');
-      const fileTree = execSync(
-        'find . -type f -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.go" -o -name "*.java" -o -name "*.cpp" -o -name "*.c" | head -50',
-        { encoding: 'utf8' }
-      );
-      this.log(`Found ${fileTree.split('\n').filter(line => line.trim()).length} relevant files`);
+      const context = this.getRepositoryContext();
+      this.log(`Context: ${context.type} repository with ${context.relevantFiles.length} relevant files`);
 
-      const prompt = `You are DevAgent, an AI assistant that fixes GitHub issues.
-
-ISSUE TO FIX:
-Title: ${this.issueTitle}
-Number: #${this.issueNumber}
-Description:
-${this.issueBody}
-
-REPOSITORY CONTEXT:
-Key files found:
-${fileTree}
-
-TASK:
-1. Analyze the issue description carefully
-2. Explore the codebase to understand the current implementation
-3. Identify the root cause of the issue
-4. Implement a fix that addresses the issue completely
-5. Ensure the fix follows the existing code patterns and conventions
-6. Test your changes if possible
-
-Please start by exploring the codebase to understand the issue better, then implement the necessary fixes.`;
+      const prompt = this.buildOptimizedPrompt(context);
 
       this.log(`Prompt length: ${prompt.length} characters`);
 
@@ -515,13 +821,150 @@ Please start by exploring the codebase to understand the issue better, then impl
   }
 }
 
+// Add cache update methods to DevAgent class
+DevAgent.prototype.updateCacheMode = async function() {
+  try {
+    this.log('Running in cache update mode');
+
+    // Read changed files from environment or file
+    let changedFiles = [];
+    if (process.env.CHANGED_FILES && fs.existsSync(process.env.CHANGED_FILES)) {
+      const fileList = fs.readFileSync(process.env.CHANGED_FILES, 'utf8');
+      changedFiles = fileList.split('\n').filter(f => f.trim());
+    }
+
+    this.log(`Processing ${changedFiles.length} changed files`);
+
+    // Update file summaries for changed files only
+    let updatedFiles = 0;
+    for (const file of changedFiles) {
+      if (this.isRelevantFileForCache(file)) {
+        await this.updateFileSummary(file);
+        updatedFiles++;
+      }
+    }
+
+    // Update repository structure if package.json or config files changed
+    const structuralChanges = changedFiles.some(f =>
+      f.includes('package.json') ||
+      f.includes('.config.') ||
+      f.includes('tsconfig.json') ||
+      f.includes('webpack.config') ||
+      f.includes('next.config')
+    );
+
+    if (structuralChanges) {
+      this.log('Structural changes detected, updating repository structure');
+      const structure = this.analyzeRepositoryStructure();
+      this.cache.saveRepositoryStructure(structure);
+    }
+
+    this.log(`Cache update completed. Updated ${updatedFiles} file summaries`);
+
+  } catch (error) {
+    this.log(`Cache update failed: ${error.message}`, 'error');
+    process.exit(1);
+  }
+};
+
+DevAgent.prototype.isRelevantFileForCache = function(file) {
+  // Skip test files, build outputs, configs, docs
+  const skipPatterns = [
+    /node_modules/,
+    /\.git/,
+    /dist\/|build\/|out\//,
+    /\.test\.|\.spec\./,
+    /test\/|tests\/|__tests__/,
+    /\.md$|\.txt$/,
+    /\.json$/, // Skip most JSON files except package.json
+    /\.lock$|yarn\.lock|package-lock\.json/
+  ];
+
+  if (skipPatterns.some(pattern => pattern.test(file))) {
+    return false;
+  }
+
+  // Include source files
+  const includePatterns = [
+    /\.(js|ts|jsx|tsx|py|go|java|cpp|c|php|rb)$/,
+    /package\.json$/ // Exception for package.json
+  ];
+
+  return includePatterns.some(pattern => pattern.test(file));
+};
+
+DevAgent.prototype.updateFileSummary = async function(file) {
+  try {
+    if (!fs.existsSync(file)) {
+      this.log(`File ${file} no longer exists, removing from cache`);
+      this.cache.removeFileSummary(file);
+      return;
+    }
+
+    this.log(`Updating summary for ${file}`);
+    const content = fs.readFileSync(file, 'utf8');
+
+    // Generate a brief summary (you could use Claude for this, but for now a simple approach)
+    const lines = content.split('\n');
+    const summary = {
+      lineCount: lines.length,
+      functions: this.extractFunctions(content),
+      lastModified: fs.statSync(file).mtime,
+      purpose: this.inferFilePurpose(file, content)
+    };
+
+    this.cache.saveFileSummary(file, summary);
+  } catch (error) {
+    this.log(`Failed to update summary for ${file}: ${error.message}`, 'warn');
+  }
+};
+
+DevAgent.prototype.extractFunctions = function(content) {
+  // Simple function extraction (can be enhanced)
+  const functionRegex = /(?:function\s+(\w+)|const\s+(\w+)\s*=|class\s+(\w+))/g;
+  const functions = [];
+  let match;
+
+  while ((match = functionRegex.exec(content)) !== null) {
+    functions.push(match[1] || match[2] || match[3]);
+  }
+
+  return functions.slice(0, 10); // Limit to avoid bloat
+};
+
+DevAgent.prototype.inferFilePurpose = function(file, content) {
+  const fileName = path.basename(file);
+
+  if (fileName.includes('test') || fileName.includes('spec')) return 'Testing';
+  if (fileName.includes('config')) return 'Configuration';
+  if (file.includes('api/') || file.includes('routes/')) return 'API/Routes';
+  if (file.includes('component') || fileName.includes('Component')) return 'UI Component';
+  if (file.includes('util') || file.includes('helper')) return 'Utility';
+  if (content.includes('export default') && content.includes('React')) return 'React Component';
+  if (content.includes('app.use') || content.includes('express')) return 'Server/Express';
+
+  return 'Source Code';
+};
+
 // Run the agent
 if (require.main === module) {
+  // Check for CLI arguments
+  const args = process.argv.slice(2);
+  const updateCacheMode = args.includes('--update-cache-mode');
+
   const agent = new DevAgent();
-  agent.run().catch((error) => {
-    console.error('Fatal error:', error);
-    process.exit(1);
-  });
+
+  if (updateCacheMode) {
+    agent.updateCacheMode().catch((error) => {
+      console.error('Cache update error:', error);
+      process.exit(1);
+    });
+  } else {
+    agent.run().catch((error) => {
+      console.error('Fatal error:', error);
+      process.exit(1);
+    });
+  }
 }
 
 module.exports = DevAgent;

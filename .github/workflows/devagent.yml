@@ -5,8 +5,8 @@ on:
   workflow_call:
     inputs:
       issue_number:
-        description: 'Issue number to fix'
-        required: true
+        description: 'Issue number to fix (required for fix mode)'
+        required: false
         type: string
       repository:
         description: 'Repository name (owner/repo)'
@@ -27,13 +27,22 @@ on:
         required: false
         type: string
         default: 'devagent@github-actions.local'
+      mode:
+        description: 'Mode: "fix" (fix issue) or "cache-update" (update cache)'
+        required: false
+        type: string
+        default: 'fix'
+      pr_number:
+        description: 'PR number for cache update mode'
+        required: false
+        type: string
     secrets:
       ANTHROPIC_API_KEY:
         description: 'Anthropic API key for Claude'
         required: true
 
 jobs:
-  devagent-fix:
+  devagent:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -60,8 +69,17 @@ jobs:
         git config --global user.name "${{ inputs.git_user_name }}"
         git config --global user.email "${{ inputs.git_user_email }}"
 
+    - name: Cache DevAgent repository insights
+      uses: actions/cache@v3
+      with:
+        path: /tmp/devagent-cache
+        key: devagent-${{ github.repository }}-persistent
+        restore-keys: |
+          devagent-${{ github.repository }}-persistent
+
     - name: Get issue details
       id: issue
+      if: inputs.mode == 'fix'
       run: |
         # Use template to get clean text output instead of JSON
         TITLE=$(gh api repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }} --template '{{.title}}')
@@ -75,7 +93,23 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Run DevAgent
+    - name: Get changed files from PR
+      id: changes
+      if: inputs.mode == 'cache-update'
+      run: |
+        # Get list of changed files in the merged PR
+        gh api repos/${{ inputs.repository }}/pulls/${{ inputs.pr_number }}/files \
+          --jq '.[].filename' > /tmp/changed-files.txt
+
+        echo "Changed files:"
+        cat /tmp/changed-files.txt
+
+        echo "Total changed files: $(wc -l < /tmp/changed-files.txt)"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run DevAgent - Fix Issue
+      if: inputs.mode == 'fix'
       run: |
         node /app/orchestrator.js
       env:
@@ -89,9 +123,18 @@ jobs:
         GIT_USER_NAME: ${{ inputs.git_user_name }}
         GIT_USER_EMAIL: ${{ inputs.git_user_email }}
 
+    - name: Run DevAgent - Update Cache
+      if: inputs.mode == 'cache-update'
+      run: |
+        node /app/orchestrator.js --update-cache-mode
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPOSITORY: ${{ inputs.repository }}
+        CHANGED_FILES: /tmp/changed-files.txt
+
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: devagent-logs-${{ inputs.issue_number }}
+        name: devagent-logs-${{ inputs.mode }}-${{ inputs.issue_number || inputs.pr_number || github.run_number }}
         path: /tmp/agent-logs/

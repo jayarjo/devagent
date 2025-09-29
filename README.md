@@ -64,7 +64,53 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### 3. Optional: Add CI Feedback
+### 3. Add Cache Update Trigger
+
+To keep the DevAgent cache updated when PRs are merged, add this to your trigger file:
+
+```yaml
+name: DevAgent Trigger
+
+on:
+  issues:
+    types: [opened, labeled]
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  check-ai-fix-label:
+    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'ai-fix')
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+    uses: jayarjo/devagent/.github/workflows/devagent.yml@main
+    with:
+      mode: fix
+      issue_number: ${{ github.event.issue.number }}
+      repository: ${{ github.repository }}
+      base_branch: main
+      git_user_name: "DevAgent Bot"
+      git_user_email: "devagent@yourcompany.com"
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-cache:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    permissions:
+      contents: read
+    uses: jayarjo/devagent/.github/workflows/devagent.yml@main
+    with:
+      mode: cache-update
+      repository: ${{ github.repository }}
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### 4. Optional: Add CI Feedback
 
 To get feedback when DevAgent PRs fail CI, create `.github/workflows/devagent-ci-feedback.yml`:
 
@@ -170,7 +216,7 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### 4. Use DevAgent
+### 5. Use DevAgent
 
 1. Create an issue describing a bug or feature request
 2. Add the `ai-fix` label to the issue
@@ -247,12 +293,23 @@ DevAgent works with any codebase but has enhanced support for:
 - Java
 - C/C++
 
+## Performance & Cost Optimization
+
+DevAgent includes intelligent caching to reduce API costs by 50-90%:
+
+- **Persistent Cache**: Repository insights are cached and incrementally updated
+- **Smart Context**: Only includes relevant files based on issue analysis
+- **Claude API Caching**: Uses stable prompt prefixes for 90% cost reduction on cached content
+- **Incremental Updates**: Cache updates only when code actually changes (via PR merge)
+
+See `COST_OPTIMIZATION.md` for detailed strategies and configuration options.
+
 ## Limitations
 
 - **Context Size**: Very large codebases may hit Claude's context limits
 - **Complex Issues**: Works best with well-defined, specific issues
 - **Review Required**: Always review generated code before merging
-- **API Costs**: Each run consumes Anthropic API credits
+- **API Costs**: Optimized but still consumes Anthropic API credits
 
 ## Best Practices
 
