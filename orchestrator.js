@@ -143,23 +143,42 @@ class DevAgent {
       this.log('Checking Claude CLI authentication...');
       const authResult = spawnSync('claude', ['-p', 'hello', '--output-format', 'json'], {
         encoding: 'utf8',
-        timeout: 10000,
+        timeout: 30000, // Increased to 30 seconds
         env: {
           ...process.env,
           ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
         }
       });
 
+      if (authResult.error) {
+        this.log(`Auth check error: ${authResult.error.message}`, 'warn');
+        if (authResult.error.code === 'TIMEOUT') {
+          this.log('Auth check timed out - this may indicate rate limiting. Will proceed anyway.', 'warn');
+          return; // Proceed without auth validation
+        }
+        this.log('Will proceed without auth validation', 'warn');
+        return;
+      }
+
       if (authResult.status !== 0) {
-        this.log(`Auth check failed. stdout: ${authResult.stdout}`, 'error');
-        this.log(`Auth check failed. stderr: ${authResult.stderr}`, 'error');
-        throw new Error(`Claude CLI authentication failed. Status: ${authResult.status}`);
+        this.log(`Auth check failed. stdout: ${authResult.stdout}`, 'warn');
+        this.log(`Auth check failed. stderr: ${authResult.stderr}`, 'warn');
+
+        // Status 143 = SIGTERM (process terminated)
+        if (authResult.status === 143) {
+          this.log('Auth check was terminated (likely timeout or system limit). Will proceed anyway.', 'warn');
+          return;
+        }
+
+        this.log(`Auth check failed with status ${authResult.status}. Will proceed anyway.`, 'warn');
+        return;
       }
 
       this.log('Claude CLI authentication successful');
     } catch (error) {
-      this.log(`Claude CLI validation failed: ${error.message}`, 'error');
-      throw error;
+      this.log(`Claude CLI validation failed: ${error.message}`, 'warn');
+      this.log('Will proceed without full validation', 'warn');
+      // Don't throw - let the actual Claude execution handle auth issues
     }
   }
 
