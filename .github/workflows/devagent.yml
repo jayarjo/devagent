@@ -128,7 +128,6 @@ jobs:
       run: |
         node /app/orchestrator.js --update-cache-mode
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         REPOSITORY: ${{ inputs.repository }}
         CHANGED_FILES: /tmp/changed-files.txt
 

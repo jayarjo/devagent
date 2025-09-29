@@ -95,7 +95,6 @@ jobs:
       git_user_email: "devagent@yourcompany.com"
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update-cache:
     if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
@@ -106,8 +105,6 @@ jobs:
       mode: cache-update
       repository: ${{ github.repository }}
       pr_number: ${{ github.event.pull_request.number }}
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### 4. Optional: Add CI Feedback
