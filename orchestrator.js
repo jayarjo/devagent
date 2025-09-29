@@ -885,8 +885,8 @@ DevAgent.prototype.updateCacheMode = async function() {
 
     if (structuralChanges) {
       this.log('Structural changes detected, updating repository structure');
-      const structure = this.analyzeRepositoryStructure();
-      this.cache.saveRepositoryStructure(structure);
+      const context = this.getRepositoryContext();
+      this.cache.saveRepositoryStructure(context);
     }
 
     this.log(`Cache update completed. Updated ${updatedFiles} file summaries`);
