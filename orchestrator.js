@@ -136,44 +136,74 @@ class RepositoryCache {
 
 class DevAgent {
   constructor() {
+    // Check if we're in cache update mode
+    const args = process.argv.slice(2);
+    this.isUpdateCacheMode = args.includes('--update-cache-mode');
+
     // Validate required environment variables
     this.validateEnvironment();
 
-    this.octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-    this.issueNumber = process.env.ISSUE_NUMBER;
-    this.issueTitle = this.sanitizeTitle(process.env.ISSUE_TITLE || '');
-    this.issueBody = process.env.ISSUE_BODY || '';
+    // Always initialize these
     this.repository = process.env.REPOSITORY;
-    this.baseBranch = process.env.BASE_BRANCH || 'main';
-    this.branchName = this.createSafeBranchName(this.issueNumber);
     this.logDir = '/tmp/agent-logs';
     this.cache = new RepositoryCache(this.repository);
+
+    if (!this.isUpdateCacheMode) {
+      // Only initialize these for fix mode
+      this.octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+      this.issueNumber = process.env.ISSUE_NUMBER;
+      this.issueTitle = this.sanitizeTitle(process.env.ISSUE_TITLE || '');
+      this.issueBody = process.env.ISSUE_BODY || '';
+      this.baseBranch = process.env.BASE_BRANCH || 'main';
+      this.branchName = this.createSafeBranchName(this.issueNumber);
+    } else {
+      // For cache update mode, we still need basic GitHub access
+      this.octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+    }
 
     // Ensure log directory exists
     fs.mkdirSync(this.logDir, { recursive: true });
   }
 
   validateEnvironment() {
-    const required = [
-      'GITHUB_TOKEN',
-      'ANTHROPIC_API_KEY',
-      'ISSUE_NUMBER',
-      'REPOSITORY'
-    ];
+    // Check if we're in cache update mode
+    const args = process.argv.slice(2);
+    const isUpdateCacheMode = args.includes('--update-cache-mode');
 
-    const missing = required.filter(env => !process.env[env]);
-    if (missing.length > 0) {
-      throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    if (isUpdateCacheMode) {
+      // Cache update mode only needs basic environment
+      const required = [
+        'GITHUB_TOKEN',
+        'REPOSITORY'
+      ];
+
+      const missing = required.filter(env => !process.env[env]);
+      if (missing.length > 0) {
+        throw new Error(`Missing required environment variables for cache update: ${missing.join(', ')}`);
+      }
+    } else {
+      // Fix mode needs full environment
+      const required = [
+        'GITHUB_TOKEN',
+        'ANTHROPIC_API_KEY',
+        'ISSUE_NUMBER',
+        'REPOSITORY'
+      ];
+
+      const missing = required.filter(env => !process.env[env]);
+      if (missing.length > 0) {
+        throw new Error(`Missing required environment variables for fix mode: ${missing.join(', ')}`);
+      }
+
+      // Validate issue number only in fix mode
+      if (!/^\d+$/.test(process.env.ISSUE_NUMBER)) {
+        throw new Error(`Invalid issue number: ${process.env.ISSUE_NUMBER}`);
+      }
     }
 
-    // Validate repository format
+    // Validate repository format (required for both modes)
     if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(process.env.REPOSITORY)) {
       throw new Error(`Invalid repository format: ${process.env.REPOSITORY}`);
-    }
-
-    // Validate issue number
-    if (!/^\d+$/.test(process.env.ISSUE_NUMBER)) {
-      throw new Error(`Invalid issue number: ${process.env.ISSUE_NUMBER}`);
     }
   }
 
@@ -948,13 +978,9 @@ DevAgent.prototype.inferFilePurpose = function(file, content) {
 
 // Run the agent
 if (require.main === module) {
-  // Check for CLI arguments
-  const args = process.argv.slice(2);
-  const updateCacheMode = args.includes('--update-cache-mode');
-
   const agent = new DevAgent();
 
-  if (updateCacheMode) {
+  if (agent.isUpdateCacheMode) {
     agent.updateCacheMode().catch((error) => {
       console.error('Cache update error:', error);
       process.exit(1);
