@@ -89,20 +89,34 @@ export class GrafanaMetrics {
     const metrics: any[] = [];
 
     for (const [metricName, points] of this.metrics.entries()) {
-      const metric = {
+      // Determine if this should be a sum (counter) or gauge
+      const isCounter = metricName.includes('_total') || metricName.includes('_count');
+
+      const dataPoints = points.map(point => ({
+        timeUnixNano: (point.timestamp * 1000000).toString(),
+        asDouble: point.value,
+        attributes: Object.entries(point.labels)
+          .filter(([key, value]) => value !== undefined)
+          .map(([key, value]) => ({ key, value: { stringValue: value as string } }))
+      }));
+
+      const metric: any = {
         name: metricName,
         description: `DevAgent metric: ${metricName}`,
         unit: this.getMetricUnit(metricName),
-        gauge: {
-          dataPoints: points.map(point => ({
-            timeUnixNano: (point.timestamp * 1000000).toString(),
-            asDouble: point.value,
-            attributes: Object.entries(point.labels)
-              .filter(([key, value]) => value !== undefined)
-              .map(([key, value]) => ({ key, value: { stringValue: value } }))
-          }))
-        }
       };
+
+      if (isCounter) {
+        metric.sum = {
+          dataPoints,
+          aggregationTemporality: 2, // CUMULATIVE
+          isMonotonic: true
+        };
+      } else {
+        metric.gauge = {
+          dataPoints
+        };
+      }
 
       metrics.push(metric);
     }
