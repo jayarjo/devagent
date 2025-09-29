@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary } from '../types';
+import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary, RepositoryContext } from '../types';
 import { RepositoryCache } from './RepositoryCache';
 import { RepositoryAnalyzer } from '../analyzers/RepositoryAnalyzer';
 import { FileRelevanceAnalyzer } from '../analyzers/FileRelevance';
@@ -233,7 +233,7 @@ export class DevAgent {
     return 'Source Code';
   }
 
-  private buildOptimizedPrompt(context: any): string {
+  private buildOptimizedPrompt(context: RepositoryContext): string {
     // Build a stable prefix for Claude API caching
     const stablePrefix = `You are DevAgent, an AI assistant that fixes GitHub issues.
 

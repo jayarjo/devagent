@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { execSync } from 'child_process';
-import { RepositoryStructure, IssueKeywords } from '../types';
+import { RepositoryStructure } from '../types';
 import { RepositoryCache } from '../core/RepositoryCache';
 import { FileRelevanceAnalyzer } from './FileRelevance';
 import { Logger } from '../utils/logger';
@@ -75,7 +75,7 @@ export class RepositoryAnalyzer {
         if (pkg.dependencies?.vue || pkg.devDependencies?.vue) return 'Vue App';
         if (pkg.type === 'module') return 'ES Module Project';
         return 'Node.js Project';
-      } catch (error) {
+      } catch (_error) {
         // Invalid package.json
       }
     }
@@ -130,7 +130,7 @@ export class RepositoryAnalyzer {
         .sort(([, a], [, b]) => b - a);
 
       return sortedLanguages[0]?.[0] || 'Unknown';
-    } catch (error) {
+    } catch (_error) {
       return 'Unknown';
     }
   }

@@ -87,3 +87,17 @@ export interface FileRelevanceScore {
   score: number;
   reasons: string[];
 }
+
+export interface SpawnError extends Error {
+  code?: string;
+  errno?: number;
+}
+
+export interface RepositoryContext {
+  type: string;
+  mainLanguage: string;
+  directories: string[];
+  configFiles: string[];
+  relevantFiles: string[];
+  fromCache: boolean;
+}

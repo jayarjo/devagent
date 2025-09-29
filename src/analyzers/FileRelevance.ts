@@ -111,8 +111,8 @@ export class FileRelevanceAnalyzer {
         .slice(0, FILE_RELEVANCE.MAX_RELEVANT_FILES)
         .map(item => item.file);
 
-    } catch (error) {
-      console.warn('Failed to find relevant files:', (error as Error).message);
+    } catch (_error) {
+      console.warn('Failed to find relevant files:', (_error as Error).message);
       return [];
     }
   }

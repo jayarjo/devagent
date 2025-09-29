@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { ClaudeResponse } from '../types';
+import { ClaudeResponse, SpawnError } from '../types';
 import { CLAUDE_CONFIG } from '../config/constants';
 import { Logger } from '../utils/logger';
 
@@ -46,7 +46,7 @@ export class ClaudeService {
 
       if (authResult.error) {
         this.logger.warn(`Auth check error: ${authResult.error.message}`);
-        if ((authResult.error as any).code === 'TIMEOUT') {
+        if ((authResult.error as SpawnError).code === 'TIMEOUT') {
           this.logger.warn('Auth check timed out - this may indicate rate limiting. Will proceed anyway.');
           return;
         }
@@ -115,10 +115,10 @@ export class ClaudeService {
 
       if (result.error) {
         this.logger.error(`Claude spawn error: ${result.error.message}`);
-        this.logger.error(`Error code: ${(result.error as any).code}`);
+        this.logger.error(`Error code: ${(result.error as SpawnError).code}`);
 
         // Check for timeout specifically
-        if ((result.error as any).code === 'TIMEOUT') {
+        if ((result.error as SpawnError).code === 'TIMEOUT') {
           throw new Error(
             `Claude CLI timed out after ${CLAUDE_CONFIG.TIMEOUT_MS / 1000}s. This could be due to:\n` +
             `- Rate limiting (Claude API usage limits reached)\n` +

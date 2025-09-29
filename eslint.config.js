@@ -29,11 +29,23 @@ export default [
     },
     rules: {
       ...typescript.configs.recommended.rules,
+      // Enforce proper TypeScript practices
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error', // Changed from warn to error
       '@typescript-eslint/no-non-null-assertion': 'warn',
-      'no-console': 'off',
+      '@typescript-eslint/no-require-imports': 'error', // Prevent require() usage
+
+      // Enforce import organization
+      'no-duplicate-imports': 'error',
+
+      // General code quality
+      'no-console': 'off', // We use console for logging
       'prefer-const': 'error',
+      'no-var': 'error',
+      'object-shorthand': 'error',
+      'prefer-arrow-callback': 'error',
+
+      // Note: Inline imports/requires should be avoided (enforced by code review)
     },
   },
   {

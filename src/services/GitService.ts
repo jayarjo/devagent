@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import { Logger } from '../utils/logger';
@@ -52,7 +53,6 @@ Co-Authored-By: ${this.gitUserName} <${this.gitUserEmail}>`;
 
       // Write commit message to file to avoid shell escaping issues
       const commitMsgFile = path.join(this.logDir, 'commit-message.txt');
-      const fs = await import('fs');
       fs.writeFileSync(commitMsgFile, commitMessage, 'utf8');
 
       this.logger.info(`Committing with message: ${commitMessage.substring(0, 100)}...`);
