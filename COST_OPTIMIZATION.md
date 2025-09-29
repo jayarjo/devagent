@@ -148,7 +148,7 @@ jobs:
           --jq '.[].filename' > /tmp/changed-files.txt
 
     - name: Update cache incrementally
-      run: node /app/orchestrator.js --update-cache-mode
+      run: node /app/dist/index.js --update-cache-mode
       env:
         CHANGED_FILES: /tmp/changed-files.txt
 

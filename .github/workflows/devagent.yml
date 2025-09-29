@@ -111,7 +111,7 @@ jobs:
     - name: Run DevAgent - Fix Issue
       if: inputs.mode == 'fix'
       run: |
-        node /app/orchestrator.js
+        node /app/dist/index.js
       env:
         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -126,7 +126,7 @@ jobs:
     - name: Run DevAgent - Update Cache
       if: inputs.mode == 'cache-update'
       run: |
-        node /app/orchestrator.js --update-cache-mode
+        node /app/dist/index.js --update-cache-mode
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         REPOSITORY: ${{ inputs.repository }}
