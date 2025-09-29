@@ -10,6 +10,7 @@ import { Logger } from '../utils/logger';
 import { Sanitizers } from '../utils/sanitizers';
 import { EnvironmentValidator } from '../utils/validators';
 import { GIT_CONFIG } from '../config/constants';
+import { CostTracker } from '../telemetry/costTracker';
 
 export class DevAgent {
   private readonly config: DevAgentConfig;
@@ -82,10 +83,42 @@ export class DevAgent {
   }
 
   async run(): Promise<void> {
-    if (this.isUpdateCacheMode) {
-      return this.runCacheUpdateMode();
+    const startTime = Date.now();
+    const mode = this.isUpdateCacheMode ? 'cache-update' : 'fix';
+
+    try {
+      if (this.isUpdateCacheMode) {
+        await this.runCacheUpdateMode();
+      } else {
+        await this.runFixMode();
+      }
+
+      const durationMs = Date.now() - startTime;
+      CostTracker.recordExecution(mode, durationMs, true, {
+        repository: this.config.repository,
+        issueNumber: this.config.issueNumber,
+        mode: mode,
+      });
+
+      this.logger.info(`DevAgent ${mode} completed successfully in ${durationMs}ms`);
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const errorMessage = (error as Error).message;
+
+      CostTracker.recordError(`devagent_${mode}`, {
+        repository: this.config.repository,
+        mode: mode,
+      });
+
+      CostTracker.recordExecution(mode, durationMs, false, {
+        repository: this.config.repository,
+        issueNumber: this.config.issueNumber,
+        mode: mode,
+      });
+
+      this.logger.error(`DevAgent ${mode} failed after ${durationMs}ms: ${errorMessage}`);
+      throw error;
     }
-    return this.runFixMode();
   }
 
   private async runFixMode(): Promise<void> {
@@ -106,6 +139,12 @@ export class DevAgent {
       this.logger.info('Gathering repository context...');
       const context = this.analyzer.getRepositoryContext(this.config.issueTitle, this.config.issueBody);
       this.logger.info(`Context: ${context.type} repository with ${context.relevantFiles.length} relevant files`);
+
+      // Record cache hit/miss for repository analysis
+      CostTracker.recordCacheHit('repository_context', context.fromCache || false, {
+        repository: this.config.repository,
+        mode: 'fix',
+      });
 
       // Build prompt for Claude
       const prompt = this.buildOptimizedPrompt(context);

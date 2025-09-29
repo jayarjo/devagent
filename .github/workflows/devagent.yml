@@ -40,6 +40,12 @@ on:
       ANTHROPIC_API_KEY:
         description: 'Anthropic API key for Claude'
         required: true
+      OTEL_EXPORTER_OTLP_ENDPOINT:
+        description: 'OpenTelemetry OTLP endpoint for Grafana Cloud'
+        required: false
+      OTEL_EXPORTER_OTLP_HEADERS:
+        description: 'OpenTelemetry OTLP headers for authentication'
+        required: false
 
 jobs:
   devagent:
@@ -122,6 +128,11 @@ jobs:
         BASE_BRANCH: ${{ inputs.base_branch }}
         GIT_USER_NAME: ${{ inputs.git_user_name }}
         GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+        # OpenTelemetry configuration
+        OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
+        OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+        OTEL_RESOURCE_ATTRIBUTES: service.name=devagent,service.version=1.0.0,deployment.environment=production,devagent.repository=${{ inputs.repository }},devagent.mode=fix
+        NODE_ENV: production
 
     - name: Run DevAgent - Update Cache
       if: inputs.mode == 'cache-update'
@@ -131,6 +142,11 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         REPOSITORY: ${{ inputs.repository }}
         CHANGED_FILES: /tmp/changed-files.txt
+        # OpenTelemetry configuration
+        OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
+        OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+        OTEL_RESOURCE_ATTRIBUTES: service.name=devagent,service.version=1.0.0,deployment.environment=production,devagent.repository=${{ inputs.repository }},devagent.mode=cache-update
+        NODE_ENV: production
 
     - name: Upload logs
       if: always()

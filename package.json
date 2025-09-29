@@ -13,7 +13,9 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@octokit/rest": "20.0.2"
+    "@octokit/rest": "20.0.2",
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "0.64.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

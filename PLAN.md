@@ -145,8 +145,24 @@
 - [ ] **Category classification** (bug/feature/ui/api issues).
 - [ ] **Context strategy selection** based on classification.
 
-### Priority 3: Cost Monitoring & Control
-- [ ] **Token estimation** and cost calculation.
+### Priority 3: Cost Monitoring & Control with OpenTelemetry
+- [ ] **OpenTelemetry Integration** - Set up tracing and metrics with Grafana Cloud.
+  - [ ] Core telemetry setup with OTLP exporter
+  - [ ] Resource attributes and span processors
+  - [ ] Auto-instrumentation configuration
+- [ ] **Token & Cost Tracking**
+  - [ ] Token estimation function (1 token ≈ 4 chars)
+  - [ ] Parse Claude response for actual token counts
+  - [ ] Calculate costs based on Claude pricing ($3/1M input, $15/1M output, $0.30/1M cached)
+  - [ ] Track cached vs non-cached token usage
+- [ ] **Service Instrumentation**
+  - [ ] Instrument ClaudeService with spans and metrics
+  - [ ] Track repository analysis metrics (files analyzed, cache hits)
+  - [ ] Monitor Git/GitHub operations
+- [ ] **Metrics & Dashboards**
+  - [ ] Export metrics: token_usage, api_cost, execution_time
+  - [ ] Create Grafana dashboards for cost visualization
+  - [ ] Set up alerts for cost thresholds and rate limits
 - [ ] **Budget enforcement** with configurable limits.
 - [ ] **Usage metrics** and optimization tracking.
 

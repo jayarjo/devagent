@@ -1,0 +1,214 @@
+{
+  "dashboard": {
+    "title": "DevAgent Metrics Dashboard",
+    "tags": ["devagent", "ai", "claude", "cost-tracking"],
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "title": "Claude API Costs (Last 24h)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(increase(devagent_cost_usd_total[24h]))",
+            "legendFormat": "Total Cost (USD)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 4
+          }
+        },
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+      },
+      {
+        "title": "Token Usage (Last 24h)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(increase(devagent_tokens_total{token_type=\"input\"}[24h]))",
+            "legendFormat": "Input Tokens"
+          },
+          {
+            "expr": "sum(increase(devagent_tokens_total{token_type=\"output\"}[24h]))",
+            "legendFormat": "Output Tokens"
+          },
+          {
+            "expr": "sum(increase(devagent_tokens_total{token_type=\"cached\"}[24h]))",
+            "legendFormat": "Cached Tokens"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0
+          }
+        },
+        "gridPos": { "h": 4, "w": 18, "x": 6, "y": 0 }
+      },
+      {
+        "title": "Cost per Run Over Time",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "devagent_cost_usd",
+            "legendFormat": "Cost per Run - {{repository}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 4
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 }
+      },
+      {
+        "title": "Execution Duration",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "devagent_execution_duration_ms",
+            "legendFormat": "{{operation}} - {{repository}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "decimals": 0
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }
+      },
+      {
+        "title": "Cache Hit Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "avg(devagent_cache_hit_rate) * 100",
+            "legendFormat": "Cache Hit Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": 0 },
+                { "color": "yellow", "value": 50 },
+                { "color": "green", "value": 80 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 6, "w": 6, "x": 0, "y": 12 }
+      },
+      {
+        "title": "Error Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "rate(devagent_errors_total[5m]) * 100",
+            "legendFormat": "Error Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": 0 },
+                { "color": "yellow", "value": 5 },
+                { "color": "red", "value": 10 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 6, "w": 6, "x": 6, "y": 12 }
+      },
+      {
+        "title": "Rate Limits",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(increase(devagent_rate_limits_total[24h]))",
+            "legendFormat": "Rate Limit Events (24h)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0,
+            "colorMode": "value",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": 0 },
+                { "color": "yellow", "value": 1 },
+                { "color": "red", "value": 5 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 6, "w": 6, "x": 12, "y": 12 }
+      },
+      {
+        "title": "Success Rate by Repository",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (repository) (devagent_operations_total{success=\"true\"})",
+            "legendFormat": "{{repository}} - Success"
+          },
+          {
+            "expr": "sum by (repository) (devagent_operations_total{success=\"false\"})",
+            "legendFormat": "{{repository}} - Failed"
+          }
+        ],
+        "gridPos": { "h": 6, "w": 6, "x": 18, "y": 12 }
+      },
+      {
+        "title": "Token Distribution",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "increase(devagent_tokens_total[5m])",
+            "legendFormat": "{{token_type}} - {{repository}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 }
+      },
+      {
+        "title": "Cost Savings from Caching",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "(devagent_tokens_total{token_type=\"input\"} * 3.0 - devagent_tokens_total{token_type=\"cached\"} * 0.3) / 1000000",
+            "legendFormat": "Estimated Savings (USD) - {{repository}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 4
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 }
+      }
+    ]
+  }
+}
