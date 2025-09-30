@@ -186,6 +186,181 @@ CI runs on PR → feedback provided if tests fail
 - Configuration externalized to constants file
 - Utilities kept generic and reusable
 
+## Testing Guidelines & Standards
+
+### Test Structure and Organization
+
+```
+tests/
+├── providers/           # AI provider tests (ProviderFactory, Claude, Gemini, OpenAI)
+├── core/               # Core functionality (DevAgent, RepositoryCache, CostTracker)
+├── services/           # Service layer (GitService, GitHubService)
+├── analyzers/          # Analysis logic (FileRelevance, RepositoryAnalyzer)
+├── utils/              # Utility functions (validators, sanitizers, tokenEstimation)
+├── integration/        # End-to-end integration tests
+└── fixtures/           # Test data and mocks
+```
+
+### Test Writing Standards
+
+#### File Naming
+- **Test files**: `{ModuleName}.test.ts`
+- **Test helpers**: `{functionality}Helpers.ts`
+- **Mock data**: `mock{DataType}.ts`
+
+#### Test Case Structure
+```typescript
+describe('ModuleName', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    // Reset environment for clean tests
+    process.env = { ...originalEnv };
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  describe('methodName', () => {
+    it('should perform expected behavior when condition met', () => {
+      // Arrange
+      const input = 'test input';
+      const expected = 'expected output';
+
+      // Act
+      const result = ModuleName.methodName(input);
+
+      // Assert
+      expect(result).toBe(expected);
+    });
+  });
+});
+```
+
+#### Required Test Categories
+
+1. **Provider Tests** - Test AI provider selection, priority order, and cost calculations
+   ```typescript
+   it('should prioritize Claude > Gemini > OpenAI in auto-detection', () => {
+     process.env.ANTHROPIC_API_KEY = 'key1';
+     process.env.GOOGLE_API_KEY = 'key2';
+     expect(ProviderFactory.detectProvider()).toBe(AIProvider.CLAUDE);
+   });
+   ```
+
+2. **Cost Calculation Tests** - Verify provider-specific pricing accuracy
+   ```typescript
+   it('should calculate Gemini costs 65%+ cheaper than Claude', () => {
+     const usage = { inputTokens: 1000000, outputTokens: 1000000, cachedTokens: 0 };
+     const claudeCost = CostTracker.calculateCost(usage, AIProvider.CLAUDE);
+     const geminiCost = CostTracker.calculateCost(usage, AIProvider.GEMINI);
+     const savings = ((claudeCost.totalCost - geminiCost.totalCost) / claudeCost.totalCost) * 100;
+     expect(savings).toBeGreaterThan(65);
+   });
+   ```
+
+3. **Environment Variable Tests** - Test configuration and provider detection
+   ```typescript
+   it('should fallback to Claude when no API keys present', () => {
+     // All API keys deleted in beforeEach
+     expect(ProviderFactory.detectProvider()).toBe(AIProvider.CLAUDE);
+   });
+   ```
+
+4. **Error Handling Tests** - Test graceful failure scenarios
+   ```typescript
+   it('should throw meaningful error when all providers fail', async () => {
+     await expect(ProviderFactory.createProviderWithFallback('/tmp'))
+       .rejects.toThrow('All AI providers failed to initialize');
+   });
+   ```
+
+#### Test Naming Conventions
+- **Descriptive**: `should calculate cost correctly for Claude provider`
+- **Behavioral**: `should prioritize Claude when all providers available`
+- **Conditional**: `should fallback to Gemini when Claude fails`
+- **Error cases**: `should throw error when no API key provided`
+
+### Test Commands
+
+```bash
+# Development workflow
+bun run test          # Watch mode for active development
+bun run test:run      # Single run for CI/CD
+bun run test:coverage # Coverage analysis (aim for >80% on new code)
+
+# Targeted testing
+bun run test:run tests/providers/ProviderFactory.test.ts
+bun run test:run --grep "provider priority"
+```
+
+### Test Requirements
+
+**Before submitting code:**
+1. ✅ All tests pass: `bun run test:run`
+2. ✅ Coverage >80% for new code: `bun run test:coverage`
+3. ✅ Type checking: `bun run type-check`
+4. ✅ Linting: `bun run lint`
+
+**Test Coverage Standards:**
+- **Critical paths**: 100% coverage (provider selection, cost calculation)
+- **Business logic**: 90%+ coverage
+- **Utility functions**: 85%+ coverage
+- **Integration points**: Error scenarios must be tested
+
+### Testing Best Practices
+
+1. **Environment Isolation**: Always reset `process.env` in `beforeEach`/`afterEach`
+2. **Test One Thing**: Each test should verify a single behavior
+3. **Realistic Data**: Use meaningful test data that represents real scenarios
+4. **Error Testing**: Test both success and failure paths
+5. **Async Testing**: Properly handle promises and async operations
+6. **Mock External Dependencies**: Don't make real API calls in tests
+
+### Example Test Patterns
+
+**Provider Priority Testing:**
+```typescript
+const priorityTests = [
+  { keys: ['ANTHROPIC_API_KEY'], expected: AIProvider.CLAUDE },
+  { keys: ['GOOGLE_API_KEY'], expected: AIProvider.GEMINI },
+  { keys: ['OPENAI_API_KEY'], expected: AIProvider.OPENAI },
+];
+
+priorityTests.forEach(({ keys, expected }) => {
+  it(`should select ${expected} when only ${keys[0]} available`, () => {
+    process.env[keys[0]] = 'test-key';
+    expect(ProviderFactory.detectProvider()).toBe(expected);
+  });
+});
+```
+
+**Cost Comparison Testing:**
+```typescript
+it('should demonstrate accurate cost savings between providers', () => {
+  const usage = { inputTokens: 1000000, outputTokens: 1000000, cachedTokens: 0 };
+  const costs = {
+    claude: CostTracker.calculateCost(usage, AIProvider.CLAUDE),
+    gemini: CostTracker.calculateCost(usage, AIProvider.GEMINI),
+    openai: CostTracker.calculateCost(usage, AIProvider.OPENAI),
+  };
+
+  // Verify cost ordering: Gemini < Claude < OpenAI
+  expect(costs.gemini.totalCost).toBeLessThan(costs.claude.totalCost);
+  expect(costs.claude.totalCost).toBeLessThan(costs.openai.totalCost);
+
+  // Verify specific savings (Gemini ~65% cheaper than Claude)
+  const savings = ((costs.claude.totalCost - costs.gemini.totalCost) / costs.claude.totalCost) * 100;
+  expect(savings).toBeCloseTo(65, 1);
+});
+```
+
+This testing approach ensures DevAgent maintains high quality and reliability as new features are added.
+
 ## Common Issues & Solutions
 - **Rate Limiting**: Automatic detection with helpful error messages
 - **Permission Errors**: Clear documentation for repository setup
