@@ -29,7 +29,7 @@ describe('TemplateManager', () => {
 
     fs.writeFileSync(
       path.join(testTempDir, 'github', 'pr-body.mustache'),
-      '## Summary\nThis PR addresses the issue described in #{{issueNumber}}.\n\n## Changes Made\nThe AI agent analyzed the issue and implemented the following changes:\n- Analyzed the codebase and issue requirements\n- Generated appropriate fixes based on the issue description\n- Applied changes while maintaining code quality and conventions\n\n## Issue Reference\nFixes #{{issueNumber}}\n\n---\n🤖 Generated with [DevAgent](https://github.com/jayarjo/devagent)\n\nCo-Authored-By: {{gitUserName}} <{{gitUserEmail}}>'
+      '## Summary\nThis PR addresses the issue described in #{{issueNumber}}.\n\n## Changes Made\n{{#changesSummary}}- {{.}}\n{{/changesSummary}}{{^changesSummary}}The AI agent analyzed the issue and implemented the following changes:\n- Analyzed the codebase and issue requirements\n- Generated appropriate fixes based on the issue description\n- Applied changes while maintaining code quality and conventions\n{{/changesSummary}}\n## Issue Reference\nFixes #{{issueNumber}}\n\n---\n🤖 Generated with [DevAgent](https://github.com/jayarjo/devagent)\n\nCo-Authored-By: {{gitUserName}} <{{gitUserEmail}}>'
     );
 
     fs.writeFileSync(
@@ -190,7 +190,36 @@ describe('TemplateManager', () => {
   });
 
   describe('GitHub PR Template Rendering', () => {
-    it('should render PR body correctly', () => {
+    it('should render PR body correctly with dynamic changes', () => {
+      const prData: PRTemplateData = {
+        issueNumber: '42',
+        title: 'Fix critical bug',
+        gitUserName: 'TestUser',
+        gitUserEmail: 'test@example.com',
+        changesSummary: [
+          'Fixed authentication bug in login component',
+          'Updated user validation logic in auth.ts',
+          'Added error handling for invalid credentials'
+        ]
+      };
+
+      const result = templateManager.renderPRBody(prData);
+
+      expect(result).toContain('## Summary');
+      expect(result).toContain('This PR addresses the issue described in #42');
+      expect(result).toContain('## Changes Made');
+      expect(result).toContain('- Fixed authentication bug in login component');
+      expect(result).toContain('- Updated user validation logic in auth.ts');
+      expect(result).toContain('- Added error handling for invalid credentials');
+      expect(result).toContain('Fixes #42');
+      expect(result).toContain('🤖 Generated with [DevAgent]');
+      expect(result).toContain('Co-Authored-By: TestUser <test@example.com>');
+
+      // Should not contain fallback text when changes are provided
+      expect(result).not.toContain('The AI agent analyzed the issue and implemented the following changes');
+    });
+
+    it('should render PR body correctly without dynamic changes (fallback)', () => {
       const prData: PRTemplateData = {
         issueNumber: '42',
         title: 'Fix critical bug',
@@ -202,9 +231,30 @@ describe('TemplateManager', () => {
 
       expect(result).toContain('## Summary');
       expect(result).toContain('This PR addresses the issue described in #42');
+      expect(result).toContain('## Changes Made');
+      expect(result).toContain('The AI agent analyzed the issue and implemented the following changes');
+      expect(result).toContain('- Analyzed the codebase and issue requirements');
+      expect(result).toContain('- Generated appropriate fixes based on the issue description');
+      expect(result).toContain('- Applied changes while maintaining code quality and conventions');
       expect(result).toContain('Fixes #42');
       expect(result).toContain('🤖 Generated with [DevAgent]');
       expect(result).toContain('Co-Authored-By: TestUser <test@example.com>');
+    });
+
+    it('should render PR body correctly with empty changes array (fallback)', () => {
+      const prData: PRTemplateData = {
+        issueNumber: '42',
+        title: 'Fix critical bug',
+        gitUserName: 'TestUser',
+        gitUserEmail: 'test@example.com',
+        changesSummary: []
+      };
+
+      const result = templateManager.renderPRBody(prData);
+
+      expect(result).toContain('## Changes Made');
+      expect(result).toContain('The AI agent analyzed the issue and implemented the following changes');
+      expect(result).toContain('- Analyzed the codebase and issue requirements');
     });
 
     it('should render PR title with custom title', () => {

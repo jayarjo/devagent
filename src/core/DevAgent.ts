@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary, RepositoryContext, IAIProvider, ProviderConfig } from '../types';
+import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary, RepositoryContext, IAIProvider, ProviderConfig, AIResponse } from '../types';
 import { RepositoryCache } from './RepositoryCache';
 import { TemplateManager } from './TemplateManager';
 import { RepositoryAnalyzer } from '../analyzers/RepositoryAnalyzer';
@@ -166,6 +166,9 @@ export class DevAgent {
       const result = await this.aiProvider!.runPrompt(prompt, this.providerConfig);
       this.logger.info(`${this.aiProvider!.getProviderName()} completed with ${result.messages?.length || 0} messages`);
 
+      // Extract changes summary from AI response
+      const changesSummary = this.extractChangesSummary(result);
+
       // Check if any changes were made
       this.logger.info('Checking for file changes...');
       if (this.gitService!.checkForChanges()) {
@@ -175,7 +178,8 @@ export class DevAgent {
           this.config.issueTitle || '',
           this.config.branchName,
           this.config.baseBranch,
-          this.config.issueNumber
+          this.config.issueNumber,
+          changesSummary
         );
         this.logger.info(`Successfully created PR: ${pr.html_url}`);
       } else {
@@ -303,5 +307,60 @@ export class DevAgent {
 
     // Use template manager to render optimized prompt
     return this.templateManager.renderOptimizedPrompt(systemData, issueData);
+  }
+
+  /**
+   * Extract changes summary from AI response messages
+   */
+  private extractChangesSummary(aiResponse: AIResponse): string[] {
+    if (!aiResponse.messages || aiResponse.messages.length === 0) {
+      return [];
+    }
+
+    // Combine all message content to search for the summary
+    const fullContent = aiResponse.messages
+      .map(msg => msg.content)
+      .join('\n');
+
+    // Look for the CHANGES_SUMMARY section
+    const summaryRegex = /CHANGES_SUMMARY:\s*(.*?)\s*END_SUMMARY/s;
+    const match = fullContent.match(summaryRegex);
+
+    if (!match || !match[1]) {
+      this.logger.warn('No changes summary found in AI response');
+      return [];
+    }
+
+    // Extract bullet points from the summary section
+    const summaryText = match[1].trim();
+    const lines = summaryText.split('\n').map(line => line.trim());
+
+    const bulletPoints: string[] = [];
+    let currentBullet = '';
+
+    for (const line of lines) {
+      if (line.startsWith('-')) {
+        // Save previous bullet point if it exists
+        if (currentBullet) {
+          bulletPoints.push(currentBullet.trim());
+        }
+        // Start new bullet point
+        currentBullet = line.substring(1).trim();
+      } else if (currentBullet && line.length > 0) {
+        // Continue current bullet point (multiline)
+        currentBullet += '\n  ' + line;
+      }
+    }
+
+    // Add the last bullet point
+    if (currentBullet) {
+      bulletPoints.push(currentBullet.trim());
+    }
+
+    // Filter out empty bullet points
+    const validBulletPoints = bulletPoints.filter(point => point.length > 0);
+
+    this.logger.info(`Extracted ${validBulletPoints.length} change summary items`);
+    return validBulletPoints;
   }
 }

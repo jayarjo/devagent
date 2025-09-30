@@ -30,6 +30,7 @@ export interface PRTemplateData {
   title?: string;
   gitUserName: string;
   gitUserEmail: string;
+  changesSummary?: string[];
 }
 
 // Error template data for providers

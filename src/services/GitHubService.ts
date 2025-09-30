@@ -26,7 +26,8 @@ export class GitHubService {
     title: string,
     branchName: string,
     baseBranch: string,
-    issueNumber: string
+    issueNumber: string,
+    changesSummary?: string[]
   ): Promise<GitHubPullRequest> {
     this.logger.info('Creating pull request');
 
@@ -41,7 +42,8 @@ export class GitHubService {
         issueNumber,
         title,
         gitUserName: this.gitUserName,
-        gitUserEmail: this.gitUserEmail
+        gitUserEmail: this.gitUserEmail,
+        changesSummary
       };
 
       // Use template manager to render PR content
