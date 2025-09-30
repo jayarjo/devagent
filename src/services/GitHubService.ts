@@ -1,10 +1,14 @@
 import { Octokit } from '@octokit/rest';
 import { GitHubPullRequest } from '../types';
 import { Logger } from '../utils/logger';
+import { TemplateManager } from '../core/TemplateManager';
+import { loadTemplateConfig } from '../config/templates';
+import { PRTemplateData } from '../types/templates';
 
 export class GitHubService {
   private readonly octokit: Octokit;
   private readonly logger: Logger;
+  private readonly templateManager: TemplateManager;
   private readonly repository: string;
   private readonly gitUserName: string;
   private readonly gitUserEmail: string;
@@ -12,6 +16,7 @@ export class GitHubService {
   constructor(token: string, repository: string, gitUserName?: string, gitUserEmail?: string) {
     this.octokit = new Octokit({ auth: token });
     this.logger = new Logger();
+    this.templateManager = new TemplateManager(loadTemplateConfig());
     this.repository = repository;
     this.gitUserName = gitUserName || 'DevAgent';
     this.gitUserEmail = gitUserEmail || 'devagent@github-actions.local';
@@ -31,24 +36,17 @@ export class GitHubService {
       this.logger.info(`Base branch: ${baseBranch}`);
       this.logger.info(`Head branch: ${branchName}`);
 
-      const prBody = `## Summary
-This PR addresses the issue described in #${issueNumber}.
+      // Prepare template data for PR
+      const prData: PRTemplateData = {
+        issueNumber,
+        title,
+        gitUserName: this.gitUserName,
+        gitUserEmail: this.gitUserEmail
+      };
 
-## Changes Made
-The AI agent analyzed the issue and implemented the following changes:
-- Analyzed the codebase and issue requirements
-- Generated appropriate fixes based on the issue description
-- Applied changes while maintaining code quality and conventions
-
-## Issue Reference
-Fixes #${issueNumber}
-
----
-🤖 Generated with [DevAgent](https://github.com/jayarjo/devagent)
-
-Co-Authored-By: ${this.gitUserName} <${this.gitUserEmail}>`;
-
-      const prTitle = `[AI Fix] ${title || `Issue #${issueNumber}`}`;
+      // Use template manager to render PR content
+      const prBody = this.templateManager.renderPRBody(prData);
+      const prTitle = this.templateManager.renderPRTitle(prData);
       this.logger.info(`PR title: ${prTitle}`);
       this.logger.info(`PR body length: ${prBody.length}`);
 

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary, RepositoryContext, IAIProvider, ProviderConfig } from '../types';
 import { RepositoryCache } from './RepositoryCache';
+import { TemplateManager } from './TemplateManager';
 import { RepositoryAnalyzer } from '../analyzers/RepositoryAnalyzer';
 import { FileRelevanceAnalyzer } from '../analyzers/FileRelevance';
 import { ProviderFactory } from '../providers/ProviderFactory';
@@ -11,10 +12,13 @@ import { Sanitizers } from '../utils/sanitizers';
 import { EnvironmentValidator } from '../utils/validators';
 import { GIT_CONFIG } from '../config/constants';
 import { CostTracker } from '../telemetry/costTracker';
+import { loadTemplateConfig } from '../config/templates';
+import { SystemPromptData, IssueContextData } from '../types/templates';
 
 export class DevAgent {
   private readonly config: DevAgentConfig;
   private readonly cache: RepositoryCache;
+  private readonly templateManager: TemplateManager;
   private readonly analyzer: RepositoryAnalyzer;
   private readonly logger: Logger;
   private readonly isUpdateCacheMode: boolean;
@@ -40,6 +44,7 @@ export class DevAgent {
 
     // Initialize core components
     this.cache = new RepositoryCache(this.config.repository);
+    this.templateManager = new TemplateManager(loadTemplateConfig());
     this.analyzer = new RepositoryAnalyzer(this.config.repository);
 
     // Store environment for async initialization in fix mode
@@ -280,35 +285,23 @@ export class DevAgent {
   }
 
   private buildOptimizedPrompt(context: RepositoryContext): string {
-    // Build a stable prefix for Claude API caching
-    const stablePrefix = `You are DevAgent, an AI assistant that fixes GitHub issues.
+    // Prepare template data for system prompt (stable, cacheable part)
+    const systemData: SystemPromptData = {
+      type: context.type,
+      project: this.config.repository
+    };
 
-REPOSITORY INFO:
-Type: ${context.type}
-Project: ${this.config.repository}
+    // Prepare template data for issue context (variable, non-cached part)
+    const issueData: IssueContextData = {
+      issueNumber: this.config.issueNumber || '',
+      issueTitle: this.config.issueTitle || '',
+      issueBody: this.config.issueBody || '',
+      relevantFiles: context.relevantFiles,
+      fromCache: context.fromCache,
+      cacheStatus: context.fromCache ? '(Using cached repository analysis)' : '(Fresh repository analysis)'
+    };
 
-INSTRUCTIONS:
-- Make minimal, targeted changes
-- Follow existing code patterns
-- Focus on the specific issue described
-- Avoid unnecessary modifications
-
-`;
-
-    // Variable issue context (not cached)
-    const issueContext = `CURRENT ISSUE:
-Number: #${this.config.issueNumber}
-Title: ${this.config.issueTitle}
-Description:
-${this.config.issueBody}
-
-RELEVANT FILES:
-${context.relevantFiles.join('\n')}
-
-${context.fromCache ? '(Using cached repository analysis)' : '(Fresh repository analysis)'}
-
-TASK: Analyze the issue and implement the necessary fix. Start by exploring the most relevant files to understand the current implementation.`;
-
-    return stablePrefix + issueContext;
+    // Use template manager to render optimized prompt
+    return this.templateManager.renderOptimizedPrompt(systemData, issueData);
   }
 }

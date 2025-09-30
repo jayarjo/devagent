@@ -4,13 +4,18 @@ import { spawnSync } from 'child_process';
 import { AIProvider, AIResponse, IAIProvider, ProviderConfig, SpawnError, TokenUsage } from '../types';
 import { CLAUDE_CONFIG } from '../config/constants';
 import { Logger } from '../utils/logger';
+import { TemplateManager } from '../core/TemplateManager';
+import { loadTemplateConfig } from '../config/templates';
+import { ErrorTemplateData, RateLimitTemplateData } from '../types/templates';
 
 export class ClaudeProvider implements IAIProvider {
   private readonly logger: Logger;
+  private readonly templateManager: TemplateManager;
   private readonly logDir: string;
 
   constructor(logDir: string) {
     this.logger = new Logger();
+    this.templateManager = new TemplateManager(loadTemplateConfig());
     this.logDir = logDir;
   }
 
@@ -114,13 +119,11 @@ export class ClaudeProvider implements IAIProvider {
         this.logger.error(`Error code: ${(result.error as SpawnError).code}`);
 
         if ((result.error as SpawnError).code === 'TIMEOUT') {
-          throw new Error(
-            `Claude CLI timed out after ${CLAUDE_CONFIG.TIMEOUT_MS / 1000}s. This could be due to:\n` +
-            `- Rate limiting (Claude API usage limits reached)\n` +
-            `- Network issues\n` +
-            `- Large prompt processing\n` +
-            `Consider trying again later or checking your API usage limits.`
-          );
+          const timeoutData: ErrorTemplateData = {
+            provider: 'Claude',
+            timeoutSeconds: CLAUDE_CONFIG.TIMEOUT_MS / 1000
+          };
+          throw new Error(this.templateManager.renderTimeoutError(timeoutData));
         }
 
         throw result.error;
@@ -152,7 +155,11 @@ export class ClaudeProvider implements IAIProvider {
 
         let errorHint = '';
         if (result.status === 1) {
-          errorHint = ' (common causes: authentication failure, rate limits, invalid prompt, or permission issues)';
+          const errorData: ErrorTemplateData = {
+            provider: 'Claude',
+            timeoutSeconds: CLAUDE_CONFIG.TIMEOUT_MS / 1000
+          };
+          errorHint = this.templateManager.renderCommonError(errorData);
         } else if (result.status === 127) {
           errorHint = ' (command not found - Claude CLI may not be installed)';
         } else if (result.status === 130) {
@@ -161,7 +168,11 @@ export class ClaudeProvider implements IAIProvider {
 
         const stderrText = result.stderr || '';
         if (stderrText.includes('rate limit') || stderrText.includes('usage limit') || stderrText.includes('quota')) {
-          errorHint += '\n⚠️  This appears to be a rate limiting issue. Claude API has usage limits that may cause delays up to several hours.';
+          const rateLimitData: RateLimitTemplateData = {
+            provider: 'Claude',
+            apiName: 'Claude'
+          };
+          errorHint += '\n' + this.templateManager.renderRateLimitError(rateLimitData);
         }
 
         throw new Error(`Claude exited with status ${result.status}${errorHint}. Check logs for details.`);
