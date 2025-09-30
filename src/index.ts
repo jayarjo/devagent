@@ -52,3 +52,4 @@ if (require.main === module) {
 
 export { DevAgent } from './core/DevAgent';
 export * from './types';
+export * from './providers';

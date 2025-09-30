@@ -45,6 +45,6 @@ export const INCLUDE_PATTERNS = [
 ] as const;
 
 export const REQUIRED_ENV_VARS = {
-  FIX_MODE: ['GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ISSUE_NUMBER', 'REPOSITORY'],
+  FIX_MODE: ['GITHUB_TOKEN', 'ISSUE_NUMBER', 'REPOSITORY'], // AI provider keys validated separately
   CACHE_UPDATE_MODE: ['GITHUB_TOKEN', 'REPOSITORY'],
 } as const;

@@ -33,6 +33,47 @@ export interface ClaudeResponse {
   };
 }
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens?: number;
+}
+
+export interface AIResponse {
+  messages?: Array<{
+    role: string;
+    content: string;
+  }>;
+  usage?: TokenUsage;
+  error?: {
+    message: string;
+    code?: string;
+  };
+}
+
+export enum AIProvider {
+  CLAUDE = 'claude',
+  GEMINI = 'gemini',
+  OPENAI = 'openai',
+}
+
+export interface ProviderConfig {
+  provider: AIProvider;
+  model?: string;
+  apiKey?: string;
+  timeout?: number;
+  maxBufferSize?: number;
+  allowedTools?: string;
+}
+
+export interface IAIProvider {
+  validateCLI(): void;
+  runPrompt(prompt: string, config?: ProviderConfig): Promise<AIResponse>;
+  parseResponse(rawOutput: string): AIResponse;
+  calculateCost(usage: TokenUsage): number;
+  getProviderName(): AIProvider;
+}
+
 export interface GitHubPullRequest {
   number: number;
   html_url: string;
@@ -56,6 +97,10 @@ export interface DevAgentConfig {
 export interface EnvironmentVariables {
   GITHUB_TOKEN?: string;
   ANTHROPIC_API_KEY?: string;
+  GOOGLE_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  AI_PROVIDER?: string;
+  AI_MODEL?: string;
   ISSUE_NUMBER?: string;
   ISSUE_TITLE?: string;
   ISSUE_BODY?: string;

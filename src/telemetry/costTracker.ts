@@ -1,11 +1,6 @@
 import { grafanaMetrics } from './grafanaMetrics';
 import { Logger } from '../utils/logger';
-
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cachedTokens?: number;
-}
+import { AIProvider, TokenUsage } from '../types';
 
 export interface CostBreakdown {
   inputCost: number;
@@ -17,10 +12,23 @@ export interface CostBreakdown {
 
 export class CostTracker {
   private static readonly logger = new Logger();
-  private static readonly PRICING = {
-    inputTokenPrice: 3.0,    // $3 per 1M tokens
-    outputTokenPrice: 15.0,  // $15 per 1M tokens
-    cachedInputPrice: 0.3,   // $0.30 per 1M cached tokens
+
+  private static readonly PROVIDER_PRICING = {
+    [AIProvider.CLAUDE]: {
+      inputTokenPrice: 3.0,    // $3 per 1M tokens
+      outputTokenPrice: 15.0,  // $15 per 1M tokens
+      cachedInputPrice: 0.3,   // $0.30 per 1M cached tokens
+    },
+    [AIProvider.GEMINI]: {
+      inputTokenPrice: 1.25,   // $1.25 per 1M tokens (Gemini 1.5 Flash)
+      outputTokenPrice: 5.0,   // $5.00 per 1M tokens (Gemini 1.5 Flash)
+      cachedInputPrice: 0.0,   // No cached tokens for Gemini
+    },
+    [AIProvider.OPENAI]: {
+      inputTokenPrice: 30.0,   // $30 per 1M tokens (GPT-4)
+      outputTokenPrice: 60.0,  // $60 per 1M tokens (GPT-4)
+      cachedInputPrice: 0.0,   // No cached tokens for OpenAI
+    },
   };
 
   static estimateTokens(text: string): number {
@@ -37,12 +45,13 @@ export class CostTracker {
     };
   }
 
-  static calculateCost(tokenUsage: TokenUsage): CostBreakdown {
+  static calculateCost(tokenUsage: TokenUsage, provider: AIProvider = AIProvider.CLAUDE): CostBreakdown {
     const { inputTokens, outputTokens, cachedTokens = 0 } = tokenUsage;
+    const pricing = this.PROVIDER_PRICING[provider];
 
-    const inputCost = (inputTokens / 1_000_000) * this.PRICING.inputTokenPrice;
-    const outputCost = (outputTokens / 1_000_000) * this.PRICING.outputTokenPrice;
-    const cachedCost = (cachedTokens / 1_000_000) * this.PRICING.cachedInputPrice;
+    const inputCost = (inputTokens / 1_000_000) * pricing.inputTokenPrice;
+    const outputCost = (outputTokens / 1_000_000) * pricing.outputTokenPrice;
+    const cachedCost = (cachedTokens / 1_000_000) * pricing.cachedInputPrice;
 
     return {
       inputCost,
@@ -53,7 +62,8 @@ export class CostTracker {
     };
   }
 
-  static recordClaudeRequest(
+  static recordAIRequest(
+    provider: AIProvider,
     promptText: string,
     response: any,
     durationMs: number,
@@ -61,12 +71,13 @@ export class CostTracker {
   ): CostBreakdown {
     const estimatedTokens = this.estimateTokens(promptText);
     const actualUsage = this.parseTokenUsage(response);
-    const costs = this.calculateCost(actualUsage);
+    const costs = this.calculateCost(actualUsage, provider);
     const cacheHit = (actualUsage.cachedTokens || 0) > 0;
 
     const baseLabels = {
       repository: labels.repository || process.env.REPOSITORY || 'unknown',
       mode: labels.mode || (process.argv.includes('--update-cache-mode') ? 'cache-update' : 'fix'),
+      provider: provider,
       cache_hit: cacheHit.toString(),
     };
 
@@ -98,9 +109,19 @@ export class CostTracker {
     grafanaMetrics.recordHistogram('devagent_prompt_size_tokens', estimatedTokens, baseLabels);
     grafanaMetrics.recordHistogram('devagent_response_size_tokens', actualUsage.outputTokens, baseLabels);
 
-    this.logger.info(`Claude request: $${costs.totalCost.toFixed(4)}, ${durationMs}ms, ${actualUsage.inputTokens}+${actualUsage.outputTokens} tokens${cacheHit ? ' (cached)' : ''}`);
+    this.logger.info(`${provider} request: $${costs.totalCost.toFixed(4)}, ${durationMs}ms, ${actualUsage.inputTokens}+${actualUsage.outputTokens} tokens${cacheHit ? ' (cached)' : ''}`);
 
     return costs;
+  }
+
+  // Backward compatibility method
+  static recordClaudeRequest(
+    promptText: string,
+    response: any,
+    durationMs: number,
+    labels: Record<string, string | undefined> = {}
+  ): CostBreakdown {
+    return this.recordAIRequest(AIProvider.CLAUDE, promptText, response, durationMs, labels);
   }
 
   static recordCacheHit(operation: string, hit: boolean, labels: Record<string, string | undefined> = {}): void {

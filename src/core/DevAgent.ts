@@ -1,9 +1,9 @@
 import * as fs from 'fs';
-import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary, RepositoryContext } from '../types';
+import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary, RepositoryContext, IAIProvider, ProviderConfig } from '../types';
 import { RepositoryCache } from './RepositoryCache';
 import { RepositoryAnalyzer } from '../analyzers/RepositoryAnalyzer';
 import { FileRelevanceAnalyzer } from '../analyzers/FileRelevance';
-import { ClaudeService } from '../services/ClaudeService';
+import { ProviderFactory } from '../providers/ProviderFactory';
 import { GitService } from '../services/GitService';
 import { GitHubService } from '../services/GitHubService';
 import { Logger } from '../utils/logger';
@@ -18,9 +18,11 @@ export class DevAgent {
   private readonly analyzer: RepositoryAnalyzer;
   private readonly logger: Logger;
   private readonly isUpdateCacheMode: boolean;
+  private readonly env: EnvironmentVariables;
 
   // Services (initialized conditionally based on mode)
-  private claudeService?: ClaudeService;
+  private aiProvider?: IAIProvider;
+  private providerConfig?: ProviderConfig;
   private gitService?: GitService;
   private githubService?: GitHubService;
 
@@ -40,10 +42,8 @@ export class DevAgent {
     this.cache = new RepositoryCache(this.config.repository);
     this.analyzer = new RepositoryAnalyzer(this.config.repository);
 
-    // Initialize services based on mode
-    if (!this.isUpdateCacheMode) {
-      this.initializeFixModeServices(env);
-    }
+    // Store environment for async initialization in fix mode
+    this.env = env;
 
     // Ensure log directory exists
     fs.mkdirSync(this.config.logDir, { recursive: true });
@@ -67,12 +67,16 @@ export class DevAgent {
     };
   }
 
-  private initializeFixModeServices(env: EnvironmentVariables): void {
+  private async initializeFixModeServices(env: EnvironmentVariables): Promise<void> {
     if (!env.GITHUB_TOKEN) {
       throw new Error('GITHUB_TOKEN is required for fix mode');
     }
 
-    this.claudeService = new ClaudeService(this.config.logDir);
+    // Initialize AI provider with fallback
+    const { provider, config } = await ProviderFactory.createProviderWithFallback(this.config.logDir);
+    this.aiProvider = provider;
+    this.providerConfig = config;
+
     this.gitService = new GitService(this.config.logDir, this.config.gitUserName, this.config.gitUserEmail);
     this.githubService = new GitHubService(
       env.GITHUB_TOKEN,
@@ -132,6 +136,9 @@ export class DevAgent {
         throw new Error('Issue number and branch name are required for fix mode');
       }
 
+      // Initialize services asynchronously
+      await this.initializeFixModeServices(this.env);
+
       // Create working branch
       await this.gitService!.createBranch(this.config.branchName);
 
@@ -146,13 +153,13 @@ export class DevAgent {
         mode: 'fix',
       });
 
-      // Build prompt for Claude
+      // Build prompt for AI provider
       const prompt = this.buildOptimizedPrompt(context);
       this.logger.info(`Prompt length: ${prompt.length} characters`);
 
-      // Run Claude to fix the issue
-      const result = await this.claudeService!.runClaude(prompt);
-      this.logger.info(`Claude completed with ${result.messages?.length || 0} messages`);
+      // Run AI provider to fix the issue
+      const result = await this.aiProvider!.runPrompt(prompt, this.providerConfig);
+      this.logger.info(`${this.aiProvider!.getProviderName()} completed with ${result.messages?.length || 0} messages`);
 
       // Check if any changes were made
       this.logger.info('Checking for file changes...');
