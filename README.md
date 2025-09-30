@@ -1,13 +1,14 @@
 # DevAgent 🤖
 
-AI-powered GitHub agent that automatically fixes issues labeled with `ai-fix` using Claude.
+AI-powered GitHub agent that automatically fixes issues labeled with `ai-fix` using multiple AI providers (Claude, Gemini, OpenAI).
 
 ## Overview
 
 DevAgent is a reusable GitHub Action that:
 - Monitors issues labeled `ai-fix`
 - Automatically analyzes the codebase and issue description
-- Generates and applies fixes using Claude AI
+- Generates and applies fixes using **multiple AI providers** (Claude, Gemini, or OpenAI)
+- **Smart provider fallback** with automatic cost optimization
 - Creates pull requests with the proposed changes
 - Provides CI feedback when tests fail
 
@@ -30,14 +31,23 @@ DevAgent is a reusable GitHub Action that:
 
 #### Set up Secrets
 
-In your repository, add these secrets (Settings → Secrets and variables → Actions):
+In your repository, add at least one AI provider API key (Settings → Secrets and variables → Actions):
 
+**Option 1: Single Provider (Claude)**
 - `ANTHROPIC_API_KEY` - Your Anthropic API key for Claude
+
+**Option 2: Multiple Providers (Recommended for reliability and cost optimization)**
+- `ANTHROPIC_API_KEY` - Your Anthropic API key for Claude ($3/$15 per 1M tokens)
+- `GOOGLE_API_KEY` - Your Google API key for Gemini ($1.25/$5 per 1M tokens - cheapest!)
+- `OPENAI_API_KEY` - Your OpenAI API key for ChatGPT ($30/$60 per 1M tokens)
+
+DevAgent will automatically use the cheapest available provider and fallback to others if needed.
 
 ### 2. Create Workflow Files
 
 Create `.github/workflows/devagent-trigger.yml` in your repository:
 
+**Basic setup (single provider):**
 ```yaml
 name: DevAgent Trigger
 
@@ -61,6 +71,36 @@ jobs:
       git_user_email: "devagent@yourcompany.com"  # Optional: customize commit email
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**Multi-provider setup (recommended):**
+```yaml
+name: DevAgent Trigger
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  check-ai-fix-label:
+    if: contains(github.event.issue.labels.*.name, 'ai-fix')
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+    uses: jayarjo/devagent/.github/workflows/devagent.yml@main
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      repository: ${{ github.repository }}
+      base_branch: main
+      ai_provider: "gemini"  # Optional: force specific provider (gemini, claude, openai)
+      git_user_name: "DevAgent Bot"
+      git_user_email: "devagent@yourcompany.com"
+    secrets:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}        # Preferred (cheapest)
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # Fallback
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}        # Last resort
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
@@ -94,7 +134,9 @@ jobs:
       git_user_name: "DevAgent Bot"
       git_user_email: "devagent@yourcompany.com"
     secrets:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
   update-cache:
     if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
@@ -225,10 +267,28 @@ jobs:
 
 ## Configuration
 
+### AI Provider Configuration
+
+DevAgent supports multiple AI providers with automatic fallback and cost optimization:
+
+| Provider | Cost (Input/Output per 1M tokens) | Best For | CLI Required |
+|----------|-----------------------------------|----------|--------------|
+| **Gemini** | $1.25 / $5.00 (cheapest) | Cost optimization, fast responses | `gemini` |
+| **Claude** | $3.00 / $15.00 (balanced) | Complex reasoning, code quality | `claude` |
+| **OpenAI** | $30.00 / $60.00 (premium) | Advanced capabilities | `codex` |
+
+**Provider Selection Logic:**
+1. **Explicit**: Set `ai_provider` workflow input to force a specific provider
+2. **Auto-detect**: Automatically uses the first available provider (based on API keys)
+3. **Fallback**: If primary provider fails, automatically tries alternatives
+4. **Cost-aware**: Prefers cheaper providers when multiple are available
+
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `AI_PROVIDER` | Force specific provider: `gemini`, `claude`, `openai` | Auto-detect |
+| `AI_MODEL` | Provider-specific model selection | Provider default |
 | `GIT_USER_NAME` | Git commit author name | `DevAgent` |
 | `GIT_USER_EMAIL` | Git commit author email | `devagent@github-actions.local` |
 
@@ -238,6 +298,8 @@ jobs:
 |-------|-------------|----------|---------|
 | `issue_number` | Issue number to fix | Yes | - |
 | `repository` | Repository name (owner/repo) | Yes | - |
+| `ai_provider` | Force specific AI provider (`gemini`, `claude`, `openai`) | No | Auto-detect |
+| `ai_model` | Provider-specific model name | No | Provider default |
 | `base_branch` | Base branch for PR | No | `main` |
 | `git_user_name` | Git commit author name | No | `DevAgent` |
 | `git_user_email` | Git commit author email | No | `devagent@github-actions.local` |
@@ -245,15 +307,17 @@ jobs:
 ## How It Works
 
 1. **Trigger**: Issue labeled with `ai-fix` triggers the workflow
-2. **Analysis**: DevAgent analyzes the issue description and codebase structure
-3. **Planning**: Claude creates a plan to fix the issue
-4. **Implementation**: Changes are made to the codebase following existing patterns
-5. **PR Creation**: A pull request is opened with:
+2. **Provider Selection**: DevAgent selects the best AI provider (Gemini → Claude → OpenAI)
+3. **Analysis**: DevAgent analyzes the issue description and codebase structure
+4. **Planning**: Selected AI provider creates a plan to fix the issue
+5. **Fallback**: If provider fails, automatically tries the next available provider
+6. **Implementation**: Changes are made to the codebase following existing patterns
+7. **PR Creation**: A pull request is opened with:
    - Title: `[AI Fix] <issue title>`
-   - Description linking to the original issue
+   - Description linking to the original issue and provider used
    - All changes committed to branch `ai/issue-<number>`
-6. **CI Integration**: Your existing CI/CD runs on the PR
-7. **Feedback**: If CI fails, DevAgent posts a comment with error details
+8. **CI Integration**: Your existing CI/CD runs on the PR
+9. **Feedback**: If CI fails, DevAgent posts a comment with error details
 
 ## Example Issue
 
@@ -292,21 +356,35 @@ DevAgent works with any codebase but has enhanced support for:
 
 ## Performance & Cost Optimization
 
-DevAgent includes intelligent caching to reduce API costs by 50-90%:
+DevAgent includes multiple layers of cost optimization:
 
+### Multi-Provider Cost Savings
+- **Provider Selection**: Automatically uses cheapest available provider (Gemini at ~84% cost savings vs OpenAI)
+- **Smart Fallback**: Falls back to more expensive providers only when needed
+- **Provider-Specific Pricing**: Accurate cost tracking per provider for optimization insights
+
+### Intelligent Caching (50-90% cost reduction)
 - **Persistent Cache**: Repository insights are cached and incrementally updated
 - **Smart Context**: Only includes relevant files based on issue analysis
-- **Claude API Caching**: Uses stable prompt prefixes for 90% cost reduction on cached content
+- **API Caching**: Uses stable prompt prefixes for 90% cost reduction on cached content
 - **Incremental Updates**: Cache updates only when code actually changes (via PR merge)
 
-See `COST_OPTIMIZATION.md` for detailed strategies and configuration options.
+### Cost Comparison Examples
+| Provider | 1M Input + 1M Output Tokens | Typical Issue Cost |
+|----------|------------------------------|-------------------|
+| **Gemini** | $6.25 | $0.31 - $1.25 |
+| **Claude** | $18.00 | $0.90 - $3.60 |
+| **OpenAI** | $90.00 | $4.50 - $18.00 |
+
+*Using Gemini can save 65-85% compared to Claude and 84-93% compared to OpenAI.*
 
 ## Limitations
 
-- **Context Size**: Very large codebases may hit Claude's context limits
+- **Context Size**: Very large codebases may hit provider context limits (varies by provider)
 - **Complex Issues**: Works best with well-defined, specific issues
 - **Review Required**: Always review generated code before merging
-- **API Costs**: Optimized but still consumes Anthropic API credits
+- **API Costs**: Optimized but still consumes AI provider API credits
+- **CLI Dependencies**: Requires provider CLI tools (claude, gemini, codex) in runtime environment
 
 ## Best Practices
 
@@ -359,18 +437,32 @@ See `COST_OPTIMIZATION.md` for detailed strategies and configuration options.
 - Check DevAgent logs in Actions artifacts
 - Try breaking down the issue into smaller parts
 
-### Issue: "Claude exited with status 1" or timeouts
+### Issue: AI provider failures or timeouts
 **Common causes:**
-- **Rate limiting**: Claude API has usage limits - may cause delays up to several hours
-- **Authentication**: Check your `ANTHROPIC_API_KEY` is valid
-- **Large prompts**: Complex codebases may hit processing limits
+- **Rate limiting**: All providers have usage limits that may cause delays
+- **Authentication**: Check your API keys are valid and have sufficient credits
+- **Large prompts**: Complex codebases may hit processing limits (varies by provider)
 - **Network issues**: Temporary connectivity problems
+- **CLI missing**: Provider CLI tools not installed in runner environment
 
 **Solutions:**
-- Wait and retry later if rate limited
-- Check your Anthropic Console for usage limits
-- Break down complex issues into smaller parts
-- Verify API key has sufficient credits/permissions
+- **Multi-provider setup**: Configure multiple providers for automatic fallback
+- **Check logs**: Look for provider-specific error messages in Actions logs
+- **Verify API keys**: Ensure all configured API keys are valid and funded
+- **Provider status**: Check individual provider status pages:
+  - Anthropic: [status.anthropic.com](https://status.anthropic.com)
+  - Google: [status.cloud.google.com](https://status.cloud.google.com)
+  - OpenAI: [status.openai.com](https://status.openai.com)
+- **Break down issues**: Split complex problems into smaller, focused issues
+
+### Issue: No provider available
+**Error:** "All AI providers failed to initialize"
+
+**Solutions:**
+- Ensure at least one API key is configured correctly
+- Check API key permissions and credit balances
+- Verify CLI tools are available in the runtime environment
+- Try with a single provider first to isolate the issue
 
 ### Issue: CI failures
 - DevAgent will comment on the PR with failure details

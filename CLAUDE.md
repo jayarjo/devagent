@@ -42,15 +42,17 @@ DevAgent is a **reusable GitHub Actions workflow** that automatically fixes GitH
 ## Key Features
 
 ### Cost Optimization
+- **Multi-Provider Support**: Choose between Claude, Gemini, or OpenAI for best pricing
 - **Smart Context Collection**: Only includes 20 most relevant files (not 50+)
 - **Persistent Caching**: 95%+ cache hit rate with incremental updates
-- **Claude API Caching**: Stable prompt prefixes for 90% cost reduction
+- **Provider-Specific Pricing**: Accurate cost tracking per AI provider
 - **Issue Classification**: Different strategies for simple vs complex issues
 
 ### Reliability Features
+- **Multi-Provider Fallback**: Automatic fallback between AI providers
 - **Environment Validation**: Mode-aware validation (fix vs cache-update)
 - **Error Handling**: Comprehensive error handling with retry logic
-- **Rate Limit Detection**: Detects and handles Claude API rate limiting
+- **Rate Limit Detection**: Detects and handles API rate limiting across providers
 - **Git Safety**: Proper branch naming, commit message formatting
 
 ## Configuration
@@ -58,7 +60,10 @@ DevAgent is a **reusable GitHub Actions workflow** that automatically fixes GitH
 ### Required Environment Variables
 **Fix Mode:**
 - `GITHUB_TOKEN` - GitHub API access (auto-provided by Actions)
-- `ANTHROPIC_API_KEY` - Claude API access
+- At least one AI provider API key:
+  - `ANTHROPIC_API_KEY` - Claude API access
+  - `GOOGLE_API_KEY` - Gemini API access
+  - `OPENAI_API_KEY` - OpenAI API access
 - `ISSUE_NUMBER` - GitHub issue number to fix
 - `REPOSITORY` - Repository name (owner/repo format)
 
@@ -67,15 +72,57 @@ DevAgent is a **reusable GitHub Actions workflow** that automatically fixes GitH
 - `REPOSITORY` - Repository name
 - `CHANGED_FILES` - Path to file listing changed files
 
+### AI Provider Configuration
+- `AI_PROVIDER` - Specific provider to use: `claude`, `gemini`, or `openai` (optional, auto-detected)
+- `AI_MODEL` - Provider-specific model selection (optional, uses defaults)
+
 ### Optional Configuration
 - `BASE_BRANCH` - Target branch (default: 'main')
 - `GIT_USER_NAME` - Commit author name (default: 'DevAgent')
 - `GIT_USER_EMAIL` - Commit author email (default: 'devagent@github-actions.local')
 
+## AI Provider Support
+
+### Supported Providers
+1. **Claude (Anthropic)**: $3/$15 per 1M tokens (input/output), best for reasoning
+2. **Gemini (Google)**: $1.25/$5 per 1M tokens, fastest and cheapest
+3. **OpenAI (ChatGPT)**: $30/$60 per 1M tokens, most expensive but versatile
+
+### Provider Selection Logic
+1. **Explicit Selection**: Set `AI_PROVIDER=gemini` to force a specific provider
+2. **Auto-Detection**: Automatically detects available API keys and chooses the first available
+3. **Fallback Chain**: If primary provider fails, automatically tries alternatives
+4. **Cost Optimization**: Compare pricing across providers for cost-effective operations
+
+### Multi-Provider Setup Examples
+
+**Single Provider (Claude):**
+```yaml
+env:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+**Multi-Provider with Preference:**
+```yaml
+env:
+  AI_PROVIDER: gemini  # Prefer Gemini for cost
+  GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # Fallback
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}        # Last resort
+```
+
+**Auto-Detection:**
+```yaml
+env:
+  GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  # Will auto-select Gemini (first detected)
+```
+
 ## Usage Patterns
 
 ### Repository Setup
-1. Add `ANTHROPIC_API_KEY` to repository secrets
+1. Add at least one AI provider API key to repository secrets
 2. Create `.github/workflows/devagent-trigger.yml`
 3. Configure repository permissions for PR creation
 4. Label issues with `ai-fix` to trigger
