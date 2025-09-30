@@ -1,6 +1,7 @@
 import * as fs from 'fs';
-import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary, RepositoryContext, IAIProvider, ProviderConfig } from '../types';
+import { DevAgentConfig, DevAgentMode, EnvironmentVariables, FileSummary, RepositoryContext, IAIProvider, ProviderConfig, AIResponse } from '../types';
 import { RepositoryCache } from './RepositoryCache';
+import { TemplateManager } from './TemplateManager';
 import { RepositoryAnalyzer } from '../analyzers/RepositoryAnalyzer';
 import { FileRelevanceAnalyzer } from '../analyzers/FileRelevance';
 import { ProviderFactory } from '../providers/ProviderFactory';
@@ -11,10 +12,13 @@ import { Sanitizers } from '../utils/sanitizers';
 import { EnvironmentValidator } from '../utils/validators';
 import { GIT_CONFIG } from '../config/constants';
 import { CostTracker } from '../telemetry/costTracker';
+import { loadTemplateConfig } from '../config/templates';
+import { SystemPromptData, IssueContextData } from '../types/templates';
 
 export class DevAgent {
   private readonly config: DevAgentConfig;
   private readonly cache: RepositoryCache;
+  private readonly templateManager: TemplateManager;
   private readonly analyzer: RepositoryAnalyzer;
   private readonly logger: Logger;
   private readonly isUpdateCacheMode: boolean;
@@ -40,6 +44,7 @@ export class DevAgent {
 
     // Initialize core components
     this.cache = new RepositoryCache(this.config.repository);
+    this.templateManager = new TemplateManager(loadTemplateConfig());
     this.analyzer = new RepositoryAnalyzer(this.config.repository);
 
     // Store environment for async initialization in fix mode
@@ -161,6 +166,9 @@ export class DevAgent {
       const result = await this.aiProvider!.runPrompt(prompt, this.providerConfig);
       this.logger.info(`${this.aiProvider!.getProviderName()} completed with ${result.messages?.length || 0} messages`);
 
+      // Extract changes summary from AI response
+      const changesSummary = this.extractChangesSummary(result);
+
       // Check if any changes were made
       this.logger.info('Checking for file changes...');
       if (this.gitService!.checkForChanges()) {
@@ -170,7 +178,8 @@ export class DevAgent {
           this.config.issueTitle || '',
           this.config.branchName,
           this.config.baseBranch,
-          this.config.issueNumber
+          this.config.issueNumber,
+          changesSummary
         );
         this.logger.info(`Successfully created PR: ${pr.html_url}`);
       } else {
@@ -280,35 +289,78 @@ export class DevAgent {
   }
 
   private buildOptimizedPrompt(context: RepositoryContext): string {
-    // Build a stable prefix for Claude API caching
-    const stablePrefix = `You are DevAgent, an AI assistant that fixes GitHub issues.
+    // Prepare template data for system prompt (stable, cacheable part)
+    const systemData: SystemPromptData = {
+      type: context.type,
+      project: this.config.repository
+    };
 
-REPOSITORY INFO:
-Type: ${context.type}
-Project: ${this.config.repository}
+    // Prepare template data for issue context (variable, non-cached part)
+    const issueData: IssueContextData = {
+      issueNumber: this.config.issueNumber || '',
+      issueTitle: this.config.issueTitle || '',
+      issueBody: this.config.issueBody || '',
+      relevantFiles: context.relevantFiles,
+      fromCache: context.fromCache,
+      cacheStatus: context.fromCache ? '(Using cached repository analysis)' : '(Fresh repository analysis)'
+    };
 
-INSTRUCTIONS:
-- Make minimal, targeted changes
-- Follow existing code patterns
-- Focus on the specific issue described
-- Avoid unnecessary modifications
+    // Use template manager to render optimized prompt
+    return this.templateManager.renderOptimizedPrompt(systemData, issueData);
+  }
 
-`;
+  /**
+   * Extract changes summary from AI response messages
+   */
+  private extractChangesSummary(aiResponse: AIResponse): string[] {
+    if (!aiResponse.messages || aiResponse.messages.length === 0) {
+      return [];
+    }
 
-    // Variable issue context (not cached)
-    const issueContext = `CURRENT ISSUE:
-Number: #${this.config.issueNumber}
-Title: ${this.config.issueTitle}
-Description:
-${this.config.issueBody}
+    // Combine all message content to search for the summary
+    const fullContent = aiResponse.messages
+      .map(msg => msg.content)
+      .join('\n');
 
-RELEVANT FILES:
-${context.relevantFiles.join('\n')}
+    // Look for the CHANGES_SUMMARY section
+    const summaryRegex = /CHANGES_SUMMARY:\s*(.*?)\s*END_SUMMARY/s;
+    const match = fullContent.match(summaryRegex);
 
-${context.fromCache ? '(Using cached repository analysis)' : '(Fresh repository analysis)'}
+    if (!match || !match[1]) {
+      this.logger.warn('No changes summary found in AI response');
+      return [];
+    }
 
-TASK: Analyze the issue and implement the necessary fix. Start by exploring the most relevant files to understand the current implementation.`;
+    // Extract bullet points from the summary section
+    const summaryText = match[1].trim();
+    const lines = summaryText.split('\n').map(line => line.trim());
 
-    return stablePrefix + issueContext;
+    const bulletPoints: string[] = [];
+    let currentBullet = '';
+
+    for (const line of lines) {
+      if (line.startsWith('-')) {
+        // Save previous bullet point if it exists
+        if (currentBullet) {
+          bulletPoints.push(currentBullet.trim());
+        }
+        // Start new bullet point
+        currentBullet = line.substring(1).trim();
+      } else if (currentBullet && line.length > 0) {
+        // Continue current bullet point (multiline)
+        currentBullet += '\n  ' + line;
+      }
+    }
+
+    // Add the last bullet point
+    if (currentBullet) {
+      bulletPoints.push(currentBullet.trim());
+    }
+
+    // Filter out empty bullet points
+    const validBulletPoints = bulletPoints.filter(point => point.length > 0);
+
+    this.logger.info(`Extracted ${validBulletPoints.length} change summary items`);
+    return validBulletPoints;
   }
 }
