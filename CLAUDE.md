@@ -90,9 +90,9 @@ DevAgent is a **reusable GitHub Actions workflow** that automatically fixes GitH
 
 ### Provider Selection Logic
 1. **Explicit Selection**: Set `AI_PROVIDER=gemini` to force a specific provider
-2. **Auto-Detection**: Automatically detects available API keys and chooses the first available
-3. **Fallback Chain**: If primary provider fails, automatically tries alternatives
-4. **Cost Optimization**: Compare pricing across providers for cost-effective operations
+2. **Auto-Detection**: Automatically detects available API keys in priority order (Claude > Gemini > OpenAI)
+3. **Fallback Chain**: If primary provider fails, automatically tries alternatives in priority order
+4. **Quality First**: Claude is prioritized by default for superior reasoning and code quality
 
 ### Multi-Provider Setup Examples
 
@@ -102,21 +102,22 @@ env:
   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-**Multi-Provider with Preference:**
+**Multi-Provider with Cost Preference:**
 ```yaml
 env:
-  AI_PROVIDER: gemini  # Prefer Gemini for cost
-  GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # Fallback
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}        # Last resort
+  AI_PROVIDER: gemini  # Override default priority for cost optimization
+  GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}        # Forced primary
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # Fallback (priority 1)
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}        # Last resort (priority 2)
 ```
 
 **Auto-Detection:**
 ```yaml
 env:
-  GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-  # Will auto-select Gemini (first detected)
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}  # Priority 1 (selected)
+  GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}        # Priority 2 (fallback)
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}        # Priority 3 (last resort)
+  # Will auto-select Claude (highest priority available)
 ```
 
 ## Usage Patterns

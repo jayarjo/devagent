@@ -21,18 +21,19 @@ export class ProviderFactory {
   }
 
   static detectProvider(): AIProvider {
+    // Priority order: Claude > Gemini > OpenAI
     if (process.env.ANTHROPIC_API_KEY) {
-      this.logger.info('Detected Claude provider via ANTHROPIC_API_KEY');
+      this.logger.info('Using Claude provider (priority 1) via ANTHROPIC_API_KEY');
       return AIProvider.CLAUDE;
     }
 
     if (process.env.GOOGLE_API_KEY) {
-      this.logger.info('Detected Gemini provider via GOOGLE_API_KEY');
+      this.logger.info('Using Gemini provider (priority 2) via GOOGLE_API_KEY');
       return AIProvider.GEMINI;
     }
 
     if (process.env.OPENAI_API_KEY) {
-      this.logger.info('Detected OpenAI provider via OPENAI_API_KEY');
+      this.logger.info('Using OpenAI provider (priority 3) via OPENAI_API_KEY');
       return AIProvider.OPENAI;
     }
 
@@ -123,8 +124,9 @@ export class ProviderFactory {
   }
 
   private static getFallbackProviders(primaryProvider: AIProvider): AIProvider[] {
-    const allProviders = [AIProvider.CLAUDE, AIProvider.GEMINI, AIProvider.OPENAI];
-    return allProviders.filter(p => p !== primaryProvider);
+    // Maintain priority order: Claude > Gemini > OpenAI
+    const priorityOrder = [AIProvider.CLAUDE, AIProvider.GEMINI, AIProvider.OPENAI];
+    return priorityOrder.filter(p => p !== primaryProvider);
   }
 
   static validateProviderAvailability(provider: AIProvider): { available: boolean; reason?: string } {
@@ -152,7 +154,9 @@ export class ProviderFactory {
   }
 
   static listAvailableProviders(): { provider: AIProvider; available: boolean; reason?: string }[] {
-    return Object.values(AIProvider).map(provider => ({
+    // Return providers in priority order: Claude > Gemini > OpenAI
+    const priorityOrder = [AIProvider.CLAUDE, AIProvider.GEMINI, AIProvider.OPENAI];
+    return priorityOrder.map(provider => ({
       provider,
       ...this.validateProviderAvailability(provider),
     }));

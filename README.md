@@ -279,9 +279,9 @@ DevAgent supports multiple AI providers with automatic fallback and cost optimiz
 
 **Provider Selection Logic:**
 1. **Explicit**: Set `ai_provider` workflow input to force a specific provider
-2. **Auto-detect**: Automatically uses the first available provider (based on API keys)
-3. **Fallback**: If primary provider fails, automatically tries alternatives
-4. **Cost-aware**: Prefers cheaper providers when multiple are available
+2. **Auto-detect**: Automatically uses providers in priority order: **Claude > Gemini > OpenAI**
+3. **Fallback**: If primary provider fails, automatically tries alternatives in priority order
+4. **Default**: Claude is the default provider for quality and reliability
 
 ### Environment Variables
 
@@ -307,10 +307,10 @@ DevAgent supports multiple AI providers with automatic fallback and cost optimiz
 ## How It Works
 
 1. **Trigger**: Issue labeled with `ai-fix` triggers the workflow
-2. **Provider Selection**: DevAgent selects the best AI provider (Gemini → Claude → OpenAI)
+2. **Provider Selection**: DevAgent selects AI provider in priority order (Claude → Gemini → OpenAI)
 3. **Analysis**: DevAgent analyzes the issue description and codebase structure
 4. **Planning**: Selected AI provider creates a plan to fix the issue
-5. **Fallback**: If provider fails, automatically tries the next available provider
+5. **Fallback**: If provider fails, automatically tries the next provider in priority order
 6. **Implementation**: Changes are made to the codebase following existing patterns
 7. **PR Creation**: A pull request is opened with:
    - Title: `[AI Fix] <issue title>`
